@@ -1,52 +1,53 @@
 # Zed Fork — distribución
 
-Infraestructura para compilar y distribuir el fork privado de Zed (tú + un amigo).
+Infraestructura para compilar y distribuir el fork de Zed (uso privado).
 
 ## Qué hay aquí
 
-- `landing/index.html` — página de descargas con botones para macOS y Windows.
-- `Caddyfile` — config del VPS con HTTPS automático + login (basic auth).
+- `landing/index.html` — página de descargas (macOS + Windows).
 - La CI vive en `.github/workflows/fork-release.yml` (raíz del repo).
+- `Caddyfile` — config alternativa si algún día se sirve la landing con Caddy
+  en vez de Dokploy (no se usa en el despliegue actual).
 
 ## Cómo se compila
 
-La build sale de GitHub Actions en tu fork:
+- **Windows** sale de GitHub Actions: **Actions → Fork Release → Run workflow**,
+  o creando un tag `fork-v*`. Produce el `.exe` sin firmar y lo sube a un
+  release en borrador.
+- **macOS** se compila en local (los runners estándar de GitHub fallan en
+  `webrtc-sys` con su Xcode):
+  `ZED_BUNDLE_EXTRA_FEATURES="runtime_shaders" ./script/bundle-mac aarch64-apple-darwin`
+  y se sube el `.dmg` al mismo release.
 
-1. Ve a **Actions → Fork Release → Run workflow** (o crea un tag `fork-v1.0.0`).
-2. El workflow compila **macOS arm64** (`.dmg`) y **Windows x64** (`.exe`), sin firmar,
-   y los sube como assets de un **release en borrador**.
-3. Revisa el release y públicalo cuando esté OK. Al publicarlo, las URLs
-   `releases/latest/download/...` quedan accesibles para la landing.
+Los binarios viven en **GitHub Releases** del fork; la landing enlaza a
+`releases/latest/download/...`. Publica el release (deja de ser borrador) para
+que esos enlaces resuelvan.
 
-> En tu Mac también puedes compilar en local con:
-> `ZED_BUNDLE_EXTRA_FEATURES="runtime_shaders" ./script/bundle-mac aarch64-apple-darwin`
-> (el `runtime_shaders` evita necesitar el compilador Metal de Xcode).
+## Despliegue de la landing (VPS actual)
 
-## Cómo se despliega la landing
+Servida en `zed.sergioroman.tech` vía **Dokploy + Traefik** (Docker Swarm), sin
+login. Componentes en el VPS `mvpvps`:
 
-En el VPS de mvpfactory:
+- Contenedor `zed-fork` (nginx) montando `/opt/zed-fork/index.html`, en la red
+  `dokploy-network`.
+- Router en `/etc/dokploy/traefik/dynamic/zedfork.yml` (file provider de
+  Traefik), con HTTPS automático (Let's Encrypt) por el certResolver de Dokploy.
 
-1. Apunta un registro DNS `A` de `zed.tudominio.com` a la IP del VPS.
-2. Instala Caddy: <https://caddyserver.com/docs/install>
-3. Copia `landing/index.html` a `/var/www/zed-fork/index.html` y edita la URL
-   `USER` por tu usuario de GitHub.
-4. Genera la contraseña: `caddy hash-password` y pégala en el `Caddyfile`.
-5. Copia el `Caddyfile` a `/etc/caddy/Caddyfile` y arranca: `sudo systemctl restart caddy`.
+Para actualizar la landing: copiar `landing/index.html` a
+`/opt/zed-fork/index.html` en el VPS (nginx lo sirve al vuelo).
 
-Listo: `https://zed.tudominio.com` pide usuario/contraseña y sirve las descargas.
+## Instalación (usuario final)
 
-## Instalación (para el usuario final)
+La app no está firmada:
 
-La app no está firmada, así que la primera vez:
+- **macOS:** click derecho sobre `Zed Fork.app` → **Abrir**, o
+  `xattr -dr com.apple.quarantine "/Applications/Zed Fork.app"`.
+- **Windows:** en SmartScreen, **Más información → Ejecutar de todas formas**.
 
-- **macOS:** click derecho sobre `Zed Fork.app` → **Abrir**. O en terminal:
-  `xattr -dr com.apple.quarantine "/Applications/Zed Fork.app"`
-- **Windows:** en el aviso de SmartScreen, **Más información → Ejecutar de todas formas**.
+## Pendiente
 
-## Pendiente (fases siguientes)
-
-- **Fase 2 — auto-update:** repuntar la URL del updater al VPS y cambiar el canal
-  a `stable` para que sondee. Requiere servir un manifiesto JSON
-  (`{"version": "...", "url": "..."}`) tras un token secreto.
-- **Fase 3 — sync con upstream:** Action programada que, al salir un release de
-  Zed, rebase la rama de features y abra una PR en el fork para que la revises.
+- **Auto-update:** repuntar la URL del updater (`auto_update.rs` →
+  `get_release_asset`) a un manifiesto servido desde el VPS que reapunte al
+  binario en GitHub, y cambiar el canal a `stable` para que sondee.
+- **Sync con upstream:** ya automatizado en `.github/workflows/sync-upstream.yml`
+  (abre un PR con cada release stable de Zed).

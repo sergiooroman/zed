@@ -3,102 +3,202 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Zed Fork — Descargas</title>
+    <title>Zed Fork</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0e0f11;
-        --card: #17191c;
-        --border: #2a2d31;
-        --text: #e6e6e6;
-        --muted: #9aa0a6;
-        --accent: #7dd3fc;
+        --bg: #0b0d10;
+        --bg-2: #101317;
+        --card: #15191e;
+        --border: #262b32;
+        --border-hover: #3a4150;
+        --text: #eef1f4;
+        --muted: #9099a3;
+        --accent: #84c5fe;
+        --accent-2: #b69cff;
       }
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
+      html,
       body {
         margin: 0;
+        padding: 0;
+      }
+      body {
         min-height: 100vh;
+        background:
+          radial-gradient(1100px 600px at 50% -12%, #17202b 0%, transparent 62%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        color: var(--text);
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 20px;
+      }
+      .wrap {
+        width: 100%;
+        max-width: 560px;
+      }
+      .logo {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--bg);
-        color: var(--text);
-        font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        padding: 24px;
+        font-size: 30px;
+        font-weight: 800;
+        color: #0b0d10;
+        margin-bottom: 22px;
       }
-      .card {
-        width: 100%;
-        max-width: 460px;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 32px;
+      h1 {
+        margin: 0 0 6px;
+        font-size: 30px;
+        letter-spacing: -0.02em;
       }
-      h1 { margin: 0 0 4px; font-size: 22px; }
-      p.sub { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+      .lead {
+        margin: 0 0 32px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .downloads {
+        display: grid;
+        gap: 12px;
+      }
       .dl {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 14px 16px;
-        margin-bottom: 12px;
+        gap: 16px;
+        padding: 18px 20px;
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 14px;
+        background: var(--card);
         text-decoration: none;
         color: var(--text);
-        transition: border-color 0.15s, background 0.15s;
+        transition:
+          border-color 0.15s ease,
+          transform 0.15s ease,
+          background 0.15s ease;
       }
-      .dl:hover { border-color: var(--accent); background: #1c1f23; }
-      .dl .os { font-weight: 600; }
-      .dl .arch { color: var(--muted); font-size: 13px; }
-      .dl .arrow { margin-left: auto; color: var(--accent); }
-      .note {
-        margin-top: 20px;
-        padding: 12px 14px;
-        background: #14171a;
-        border: 1px solid var(--border);
+      .dl:hover {
+        border-color: var(--accent);
+        background: #191e24;
+        transform: translateY(-1px);
+      }
+      .dl .icon {
+        width: 40px;
+        height: 40px;
+        flex: none;
         border-radius: 10px;
+        background: #0e1216;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+      .dl .meta {
+        display: flex;
+        flex-direction: column;
+      }
+      .dl .os {
+        font-weight: 650;
+        font-size: 15px;
+      }
+      .dl .sub {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .dl .arrow {
+        margin-left: auto;
+        color: var(--accent);
+        font-size: 20px;
+        opacity: 0.7;
+      }
+      .dl:hover .arrow {
+        opacity: 1;
+      }
+      .note {
+        margin-top: 26px;
+        padding: 14px 16px;
+        background: #0f1317;
+        border: 1px solid var(--border);
+        border-radius: 12px;
         font-size: 13px;
         color: var(--muted);
       }
-      .note b { color: var(--text); }
-      code { background: #0b0c0e; padding: 1px 5px; border-radius: 4px; }
+      .note b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      code {
+        background: #05070a;
+        padding: 1px 6px;
+        border-radius: 5px;
+        font-size: 12px;
+      }
+      footer {
+        margin-top: 28px;
+        font-size: 12.5px;
+        color: #6b727b;
+      }
+      footer a {
+        color: #8a929c;
+        text-decoration: none;
+        border-bottom: 1px solid #2c323a;
+      }
     </style>
   </head>
   <body>
-    <main class="card">
+    <main class="wrap">
+      <div class="logo">Z</div>
       <h1>Zed Fork</h1>
-      <p class="sub">Build privada con las funciones extra del Git Graph.</p>
+      <p class="lead">Un fork del editor Zed, compilado por nosotros.</p>
 
-      <!-- Sustituye USER por tu usuario de GitHub cuando publiques el release. -->
-      <a
-        class="dl"
-        href="https://github.com/USER/zed/releases/latest/download/ZedFork-macos-arm64.dmg"
-      >
-        <span>
-          <span class="os">macOS</span><br />
-          <span class="arch">Apple Silicon · .dmg</span>
-        </span>
-        <span class="arrow">↓</span>
-      </a>
+      <div class="downloads">
+        <!-- sergiooroman = fork owner; latest published release -->
+        <a
+          class="dl"
+          href="https://github.com/sergiooroman/zed/releases/latest/download/ZedFork-macos-arm64.dmg"
+        >
+          <span class="icon">🍎</span>
+          <span class="meta">
+            <span class="os">macOS</span>
+            <span class="sub">Apple Silicon · .dmg</span>
+          </span>
+          <span class="arrow">↓</span>
+        </a>
 
-      <a
-        class="dl"
-        href="https://github.com/USER/zed/releases/latest/download/ZedFork-windows-x64.exe"
-      >
-        <span>
-          <span class="os">Windows</span><br />
-          <span class="arch">x64 · instalador .exe</span>
-        </span>
-        <span class="arrow">↓</span>
-      </a>
+        <a
+          class="dl"
+          href="https://github.com/sergiooroman/zed/releases/latest/download/ZedFork-windows-x64.exe"
+        >
+          <span class="icon">🪟</span>
+          <span class="meta">
+            <span class="os">Windows</span>
+            <span class="sub">x64 · instalador .exe</span>
+          </span>
+          <span class="arrow">↓</span>
+        </a>
+      </div>
 
       <div class="note">
-        La app no está firmada. <b>macOS:</b> click derecho → Abrir la primera
-        vez (o <code>xattr -dr com.apple.quarantine "/Applications/Zed Fork.app"</code>).
-        <b>Windows:</b> "Más información" → "Ejecutar de todas formas" en
-        SmartScreen.
+        La app no está firmada, así que la primera vez:
+        <b>macOS</b> → click derecho sobre la app → «Abrir» (o
+        <code>xattr -dr com.apple.quarantine "/Applications/Zed Fork.app"</code>).
+        <b>Windows</b> → «Más información» → «Ejecutar de todas formas».
       </div>
+
+      <footer>
+        Basado en <a href="https://github.com/zed-industries/zed">Zed</a> ·
+        GPL-3.0
+      </footer>
     </main>
   </body>
 </html>
