@@ -87,6 +87,15 @@ jobs:
       - name: Add x86_64 target
         run: rustup target add x86_64-pc-windows-msvc
 
+      - name: Cache Rust build
+        # Caches the cargo registry, git deps, and dependency build artifacts so
+        # subsequent builds (e.g. after an upstream sync) don't recompile the
+        # heavy C++ deps like webrtc from scratch.
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-windows-x64
+          cache-on-failure: true
+
       - name: Prefetch dependencies
         # Populate the cargo git cache up front so cargo-about's `cargo metadata`
         # (run during license generation) doesn't fail resolving git deps.
