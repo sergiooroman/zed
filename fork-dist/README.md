@@ -44,10 +44,35 @@ La app no está firmada:
   `xattr -dr com.apple.quarantine "/Applications/Zed Fork.app"`.
 - **Windows:** en SmartScreen, **Más información → Ejecutar de todas formas**.
 
-## Pendiente
+## Auto-update
 
-- **Auto-update:** repuntar la URL del updater (`auto_update.rs` →
-  `get_release_asset`) a un manifiesto servido desde el VPS que reapunte al
-  binario en GitHub, y cambiar el canal a `stable` para que sondee.
-- **Sync con upstream:** ya automatizado en `.github/workflows/sync-upstream.yml`
-  (abre un PR con cada release stable de Zed).
+Cómo funciona (Fase 2, ya montada):
+
+1. La app (canal `dev`, con `poll_for_updates` forzado a `true`) consulta cada
+   hora `https://zed.sergioroman.tech/update/zed-{os}-{arch}.json`
+   (cambio en `auto_update.rs` → `get_release_asset`).
+2. Un **cron en el VPS** (`/opt/zed-fork/update-manifest.sh`, cada 5 min) lee el
+   último release **publicado** de GitHub y escribe esos JSON:
+   `{"version": "X.Y.Z", "url": "<asset .dmg/.exe en GitHub>"}`.
+3. Si la versión del manifiesto es mayor que la instalada, la app descarga el
+   binario de GitHub y lo aplica (mac: monta el dmg y rsync-ea `Zed Fork.app`;
+   windows: ejecuta el `.exe`).
+
+La versión se embebe en el binario desde `crates/zed/Cargo.toml` en tiempo de
+compilación; el workflow la fija desde el tag.
+
+## Cómo publicar una versión nueva
+
+1. Crea un tag `fork-vX.Y.Z` **con una versión mayor que la anterior** y **>= la
+   base de upstream** (hoy la base es `1.11.0`, así que usa `fork-v1.11.1`,
+   `fork-v1.11.2`… ; tras sincronizar upstream a 1.12.0, pasa a `fork-v1.12.1`).
+   Si la versión no sube, el auto-update no la detecta.
+2. La CI compila Windows y sube el `.exe`; sube el `.dmg` de macOS (build local)
+   al mismo release.
+3. **Publica** el release (deja de ser borrador). El cron del VPS lo detecta en
+   ≤5 min y actualiza los manifiestos → las apps se auto-actualizan.
+
+## Sync con upstream
+
+Automatizado en `.github/workflows/sync-upstream.yml`: abre un PR con cada
+release stable de Zed. Al mergearlo, crea un tag `fork-v*` para publicar.

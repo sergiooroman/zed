@@ -185,7 +185,9 @@ impl ReleaseChannel {
 
     /// Returns whether we want to poll for updates for this [`ReleaseChannel`]
     pub fn poll_for_updates(&self) -> bool {
-        !matches!(self, ReleaseChannel::Dev)
+        // Fork: always poll. The fork ships on the `dev` channel (which upstream
+        // never auto-updates), but we serve our own update manifest.
+        true
     }
 
     /// Returns the display name for this [`ReleaseChannel`].

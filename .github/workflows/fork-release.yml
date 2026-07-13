@@ -102,6 +102,19 @@ jobs:
         shell: pwsh
         run: cargo fetch --target x86_64-pc-windows-msvc
 
+      - name: Set fork version from tag
+        # Embed the release version (fork-vX.Y.Z -> X.Y.Z) into the binary so the
+        # auto-updater can compare it against the manifest. Tag each release with
+        # a version higher than the last (and >= the upstream base).
+        shell: pwsh
+        run: |
+          $v = "$env:RELEASE_TAG" -replace '^fork-v', ''
+          $p = 'crates/zed/Cargo.toml'
+          $c = Get-Content $p -Raw
+          $c = $c -replace '(?m)^version = "[^"]*"', "version = `"$v`""
+          Set-Content $p $c -NoNewline
+          Write-Host "zed crate version set to $v"
+
       - name: Build unsigned .exe installer
         # No Azure signing secrets set -> the script skips signing.
         shell: pwsh

@@ -628,27 +628,14 @@ impl AutoUpdater {
             (None, None, None)
         };
 
-        let version = if let Some(mut version) = version {
-            version.pre = semver::Prerelease::EMPTY;
-            version.build = semver::BuildMetadata::EMPTY;
-            version.to_string()
-        } else {
-            "latest".to_string()
-        };
         let http_client = client.http_client();
 
-        let path = format!("/releases/{}/{}/asset", release_channel.dev_name(), version,);
-        let url = http_client.build_zed_cloud_url_with_query(
-            &path,
-            AssetQuery {
-                os,
-                arch,
-                asset,
-                metrics_id: metrics_id.as_deref(),
-                system_id: system_id.as_deref(),
-                is_staff,
-            },
-        )?;
+        // Fork: fetch the update manifest from our own server instead of Zed
+        // Cloud. Each platform's manifest is a small JSON
+        // `{ "version": ..., "url": ... }` pointing at the matching GitHub
+        // release asset, which the installer then downloads and applies.
+        let _ = (version, release_channel, system_id, metrics_id, is_staff);
+        let url = format!("https://zed.sergioroman.tech/update/{asset}-{os}-{arch}.json");
 
         let mut response = http_client
             .get(url.as_str(), Default::default(), true)
