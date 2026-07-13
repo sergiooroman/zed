@@ -1,0 +1,19 @@
+# Caddy config for the login-gated landing page on your VPS.
+# Caddy gives you automatic HTTPS (Let's Encrypt) and HTTP basic auth in a
+# few lines. Install: https://caddyserver.com/docs/install
+#
+# 1. Replace zed.tudominio.com with your domain (pointing an A record at the VPS).
+# 2. Generate the password hash:  caddy hash-password
+#    then paste it below in place of THE_BCRYPT_HASH.
+# 3. Put index.html in /var/www/zed-fork/
+# 4. Run:  sudo caddy run --config /etc/caddy/Caddyfile
+
+zed.tudominio.com {
+	root * /var/www/zed-fork
+	file_server
+
+	basic_auth {
+		# usuario  hash-bcrypt
+		amigo THE_BCRYPT_HASH
+	}
+}

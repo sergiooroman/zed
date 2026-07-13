@@ -1,0 +1,85 @@
+# Fork release workflow — builds unsigned macOS (arm64) and Windows (x64)
+# artifacts and attaches them to a GitHub Release on the fork.
+#
+# Trigger by pushing a tag like `fork-v1.0.0`, or manually via the Actions tab.
+# The landing page / VPS links to the resulting release assets.
+name: Fork Release
+
+on:
+  push:
+    tags:
+      - "fork-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. fork-v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # Resolve the tag from either the push ref or the manual input.
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  macos:
+    name: Build macOS (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show # honors rust-toolchain.toml
+
+      - name: Add aarch64 target
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Build unsigned .dmg
+        # No signing env vars set -> the script skips signing/notarization.
+        # GitHub macOS runners ship Xcode, so shaders are precompiled; we do
+        # not need the runtime_shaders fallback here.
+        run: ./script/bundle-mac aarch64-apple-darwin
+
+      - name: Rename artifact
+        run: |
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/Zed-aarch64.dmg "dist/ZedFork-macos-arm64.dmg"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes "Fork build" --draft --clobber || true
+          gh release upload "$RELEASE_TAG" dist/ZedFork-macos-arm64.dmg --clobber
+
+  windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Add x86_64 target
+        run: rustup target add x86_64-pc-windows-msvc
+
+      - name: Build unsigned .exe installer
+        # No Azure signing secrets set -> the script skips signing.
+        shell: pwsh
+        run: ./script/bundle-windows.ps1 -Architecture x86_64
+
+      - name: Rename artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/Zed-x86_64.exe dist/ZedFork-windows-x64.exe
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "$env:RELEASE_TAG" --title "$env:RELEASE_TAG" --notes "Fork build" --draft --clobber
+          gh release upload "$env:RELEASE_TAG" dist/ZedFork-windows-x64.exe --clobber

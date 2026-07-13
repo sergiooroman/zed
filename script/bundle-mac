@@ -9,6 +9,15 @@ open_result=false
 local_install=false
 can_code_sign=false
 
+# Optional extra cargo features for the fork build. Set to
+# "gpui_platform/runtime_shaders" to build without the Xcode Metal compiler
+# (shaders are compiled at runtime via the system Metal framework instead).
+extra_features="${ZED_BUNDLE_EXTRA_FEATURES:-}"
+features_flag=()
+if [[ -n "${extra_features}" ]]; then
+    features_flag=(--features "${extra_features}")
+fi
+
 # This must match the team in the provisioning profile.
 IDENTITY="Zed Industries, Inc."
 APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
@@ -87,7 +96,7 @@ script/generate-licenses
 rustup target add $target_triple
 
 echo "Compiling zed binaries"
-cargo build ${build_flag} --package zed --package cli --target $target_triple
+cargo build ${build_flag} "${features_flag[@]}" --package zed --package cli --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 cargo build ${build_flag} --package remote_server --target $target_triple
@@ -100,7 +109,7 @@ sed \
     "s/package.metadata.bundle-${channel}/package.metadata.bundle/" \
     Cargo.toml
 
-app_path=$(cargo bundle ${build_flag} --target $target_triple --select-workspace-root | xargs)
+app_path=$(cargo bundle ${build_flag} "${features_flag[@]}" --target $target_triple --select-workspace-root | xargs)
 
 mv Cargo.toml.backup Cargo.toml
 popd

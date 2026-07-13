@@ -19,6 +19,9 @@ path = "src/main.rs"
 [features]
 no-bundled-uninstall = []
 default = []
+# No-op passthrough so `cargo build --package zed --package cli --features
+# runtime_shaders` resolves; only the zed crate acts on it.
+runtime_shaders = []
 
 [dependencies]
 anyhow.workspace = true
