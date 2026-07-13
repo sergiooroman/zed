@@ -69,17 +69,23 @@ $env:ZED_RELEASE_CHANNEL = $channel
 $env:RELEASE_CHANNEL = $channel
 Pop-Location
 
+# Only sign when running in CI with the Azure Key Vault credentials present.
+# The fork build ships unsigned, so signing is skipped when they are absent.
+$script:ShouldSign = [bool]$env:CI -and [bool]$env:AZURE_TENANT_ID
+
 function CheckEnvironmentVariables {
     if(-not $env:CI) {
         return
     }
 
-    $requiredVars = @(
-        'ZED_WORKSPACE', 'RELEASE_VERSION', 'ZED_RELEASE_CHANNEL',
-        'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
-        'ACCOUNT_NAME', 'CERT_PROFILE_NAME', 'ENDPOINT',
-        'FILE_DIGEST', 'TIMESTAMP_DIGEST', 'TIMESTAMP_SERVER'
-    )
+    $requiredVars = @('ZED_WORKSPACE', 'RELEASE_VERSION', 'ZED_RELEASE_CHANNEL')
+    if ($script:ShouldSign) {
+        $requiredVars += @(
+            'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+            'ACCOUNT_NAME', 'CERT_PROFILE_NAME', 'ENDPOINT',
+            'FILE_DIGEST', 'TIMESTAMP_DIGEST', 'TIMESTAMP_SERVER'
+        )
+    }
 
     foreach ($var in $requiredVars) {
         if (-not (Test-Path "env:$var")) {
@@ -136,7 +142,7 @@ function BuildRemoteServer {
     # Create zipped remote server binary
     $remoteServerSrc = (Resolve-Path ".\$CargoOutDir\remote_server.exe").Path
 
-    if ($env:CI) {
+    if ($script:ShouldSign) {
         Write-Output "Code signing remote_server.exe"
         & "$innoDir\sign.ps1" $remoteServerSrc
     }
@@ -201,14 +207,18 @@ function MakeAppx {
         }
     }
     Copy-Item -Path "$manifestFile" -Destination "$innoDir\make_appx\AppxManifest.xml"
-    # Add makeAppx.exe to Path
-    $sdk = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
-    $env:Path += ';' + $sdk
-    makeAppx.exe pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
+    # Locate makeappx.exe across installed Windows SDK versions (newest first)
+    # instead of assuming one specific SDK build, which varies by runner.
+    $makeAppx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $makeAppx) {
+        throw "makeappx.exe not found in any Windows SDK bin directory"
+    }
+    & $makeAppx.FullName pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
 }
 
 function SignZedAndItsFriends {
-    if (-not $env:CI) {
+    if (-not $script:ShouldSign) {
         return
     }
 
@@ -348,10 +358,14 @@ function BuildInstaller {
     }
 
     $innoArgs = @($issFilePath) + $defs
-    if($env:CI) {
+    if($script:ShouldSign) {
         $signTool = "powershell.exe -ExecutionPolicy Bypass -File $innoDir\sign.ps1 `$f"
-        $innoArgs += "/sDefaultsign=`"$signTool`""
+    } else {
+        # The .iss declares SignTool=Defaultsign; provide a no-op so unsigned
+        # fork builds still compile.
+        $signTool = "cmd.exe /c rem `$f"
     }
+    $innoArgs += "/sDefaultsign=`"$signTool`""
 
     # Execute Inno Setup
     Write-Host "🚀 Running Inno Setup: $innoSetupPath $innoArgs"
