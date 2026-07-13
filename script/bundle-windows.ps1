@@ -310,17 +310,22 @@ function BuildInstaller {
             $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "dev" {
-            $appId = "{{8357632E-24A4-4F32-BA97-E575B4D1FE5D}"
+            # Fork branding: user-visible names and a distinct install identity so
+            # it doesn't share an uninstall entry with official Zed. The AppX
+            # identity (AppUserId/AppxFullName) and mutex stay as-is because they
+            # are coupled to the packaged AppxManifest and the Rust single-instance
+            # code; changing them would break packaging without a custom manifest.
+            $appId = "{{9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680}"
             $appIconName = "app-icon-dev"
-            $appName = "Zed Dev"
-            $appDisplayName = "Zed Dev"
+            $appName = "Zed Fork"
+            $appDisplayName = "Zed Fork"
             $appSetupName = "Zed-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zed-Dev-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedDev"
+            $regValueName = "ZedFork"
             $appUserId = "ZedIndustries.Zed.Dev"
-            $appShellNameShort = "Z&ed Dev"
+            $appShellNameShort = "Zed &Fork"
             $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
         }
         default {
@@ -357,15 +362,17 @@ function BuildInstaller {
         $defs += "/d$key=`"$($definitions[$key])`""
     }
 
+    if (-not $script:ShouldSign) {
+        # The .iss sets `SignTool=Defaultsign`; Inno then requires every target
+        # to actually end up signed. For unsigned fork builds, strip that
+        # directive so Inno skips signing entirely.
+        (Get-Content $issFilePath) -notmatch '^\s*SignTool=' | Set-Content $issFilePath
+    }
     $innoArgs = @($issFilePath) + $defs
     if($script:ShouldSign) {
         $signTool = "powershell.exe -ExecutionPolicy Bypass -File $innoDir\sign.ps1 `$f"
-    } else {
-        # The .iss declares SignTool=Defaultsign; provide a no-op so unsigned
-        # fork builds still compile.
-        $signTool = "cmd.exe /c rem `$f"
+        $innoArgs += "/sDefaultsign=`"$signTool`""
     }
-    $innoArgs += "/sDefaultsign=`"$signTool`""
 
     # Execute Inno Setup
     Write-Host "🚀 Running Inno Setup: $innoSetupPath $innoArgs"
