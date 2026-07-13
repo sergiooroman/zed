@@ -20,6 +20,9 @@ name = "remote_server"
 default = []
 debug-embed = ["dep:rust-embed"]
 test-support = ["fs/test-support"]
+# Passthrough so the fork's local macOS build (no Xcode Metal compiler) can pass
+# --features runtime_shaders to every bundled package uniformly.
+runtime_shaders = ["gpui_platform/runtime_shaders"]
 
 [dependencies]
 acp_thread.workspace = true
