@@ -25,6 +25,11 @@ env:
 jobs:
   macos:
     name: Build macOS (arm64)
+    # Disabled by default: stock GitHub macOS runners hit a webrtc-sys C++/libc++
+    # toolchain error that upstream avoids with self-hosted runners. The macOS
+    # .dmg is built locally instead. Set repo variable ENABLE_MAC_CI=true to
+    # attempt it in CI again.
+    if: ${{ vars.ENABLE_MAC_CI == 'true' }}
     runs-on: macos-14
     # Bash generate-licenses: setting this drops --fail and the strict
     # fail-on-stderr wrapper, so benign cargo warnings don't fail the build.
@@ -71,6 +76,12 @@ jobs:
 
       - name: Add x86_64 target
         run: rustup target add x86_64-pc-windows-msvc
+
+      - name: Prefetch dependencies
+        # Populate the cargo git cache up front so cargo-about's `cargo metadata`
+        # (run during license generation) doesn't fail resolving git deps.
+        shell: pwsh
+        run: cargo fetch --target x86_64-pc-windows-msvc
 
       - name: Build unsigned .exe installer
         # No Azure signing secrets set -> the script skips signing.
