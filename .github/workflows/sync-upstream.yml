@@ -1,0 +1,96 @@
+# Watches zed-industries/zed for new stable releases and, when one appears,
+# opens a PR merging that release tag into the fork's branch (mvp-fork-dist).
+# You review and merge it; if it merges cleanly the PR is ready, otherwise an
+# issue is opened flagging the conflicts to resolve by hand.
+#
+# NOTE: scheduled workflows only run from the repository's DEFAULT branch, so
+# mvp-fork-dist should be set as the fork's default branch.
+name: Sync Upstream Release
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mvp-fork-dist
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "fork-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Add upstream and fetch tags
+        run: |
+          git remote add upstream https://github.com/zed-industries/zed.git
+          git fetch --quiet upstream 'refs/tags/*:refs/tags/*'
+
+      - name: Determine latest upstream stable tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$(gh api repos/zed-industries/zed/releases/latest --jq .tag_name)"
+          echo "Latest upstream stable: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already integrated
+        id: check
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if git merge-base --is-ancestor "refs/tags/$TAG" HEAD; then
+            echo "Already integrated; nothing to do."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Attempt merge into a sync branch
+        id: merge
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          BRANCH="sync/upstream-$TAG"
+          git checkout -b "$BRANCH"
+          if git merge --no-edit "refs/tags/$TAG"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open PR (clean merge)
+        if: steps.check.outputs.needed == 'true' && steps.merge.outputs.conflict == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="${{ steps.merge.outputs.branch }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          git push -f origin "$BRANCH"
+          gh pr create --base mvp-fork-dist --head "$BRANCH" \
+            --title "Sync upstream $TAG" \
+            --body "Automated merge of upstream \`$TAG\` into the fork. Merged cleanly — review and merge, then cut a \`fork-v*\` tag to publish a build." \
+            2>/dev/null || echo "PR already exists for $BRANCH."
+
+      - name: Flag conflicts
+        if: steps.check.outputs.needed == 'true' && steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          gh issue create \
+            --title "Upstream sync $TAG needs manual conflict resolution" \
+            --body "Merging upstream \`$TAG\` into \`mvp-fork-dist\` produced conflicts. Resolve locally: \`git merge refs/tags/$TAG\`, fix conflicts, then push and open a PR." \
+            2>/dev/null || echo "Issue already exists for $TAG."
