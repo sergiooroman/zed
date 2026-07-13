@@ -96,7 +96,9 @@ script/generate-licenses
 rustup target add $target_triple
 
 echo "Compiling zed binaries"
-cargo build ${build_flag} "${features_flag[@]}" --package zed --package cli --target $target_triple
+# `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty, which is
+# required under `set -u` on the runner's bash 3.2.
+cargo build ${build_flag} ${features_flag[@]+"${features_flag[@]}"} --package zed --package cli --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 cargo build ${build_flag} --package remote_server --target $target_triple
@@ -109,7 +111,7 @@ sed \
     "s/package.metadata.bundle-${channel}/package.metadata.bundle/" \
     Cargo.toml
 
-app_path=$(cargo bundle ${build_flag} "${features_flag[@]}" --target $target_triple --select-workspace-root | xargs)
+app_path=$(cargo bundle ${build_flag} ${features_flag[@]+"${features_flag[@]}"} --target $target_triple --select-workspace-root | xargs)
 
 mv Cargo.toml.backup Cargo.toml
 popd
