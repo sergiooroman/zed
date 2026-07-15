@@ -995,6 +995,11 @@
     ///
     /// Default: false
     "tree_view": false,
+    // Whether to show changes from all open repositories at once, grouped by
+    // repository, instead of only the active repository.
+    //
+    // Default: false
+    "show_all_repositories": false,
     // Whether the git panel should open on startup.
     //
     // Default: false

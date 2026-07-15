@@ -359,6 +359,7 @@ fn file_diff_entry(
             let status_entry = repository.read(cx).status_for_path(&repo_path)?;
             Some((
                 GitStatusEntry {
+                    repo_id: repository.read(cx).id,
                     repo_path,
                     status: status_entry.status,
                     staging: status_entry.status.staging(),

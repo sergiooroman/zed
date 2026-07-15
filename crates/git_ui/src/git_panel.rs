@@ -429,12 +429,21 @@ impl GitHeaderEntry {
     }
 }
 
+/// A group header naming a repository, shown in the aggregated "all
+/// repositories" view above that repo's changes.
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct GitRepoHeaderEntry {
+    repo_id: RepositoryId,
+    name: SharedString,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 enum GitListEntry {
     Status(GitStatusEntry),
     TreeStatus(GitTreeStatusEntry),
     Directory(GitTreeDirEntry),
     Header(GitHeaderEntry),
+    RepoHeader(GitRepoHeaderEntry),
 }
 
 impl GitListEntry {
@@ -661,6 +670,11 @@ struct TreeNode {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GitStatusEntry {
+    /// The repository this entry belongs to. In the aggregated "all
+    /// repositories" view, entries from different repos share the list, so
+    /// actions must resolve the repo from the entry rather than assuming the
+    /// active one.
+    pub(crate) repo_id: RepositoryId,
     pub(crate) repo_path: RepoPath,
     pub(crate) status: FileStatus,
     pub(crate) staging: StageStatus,
@@ -1417,13 +1431,16 @@ impl GitPanel {
 
         if matches!(
             self.entries.get(new_index.saturating_sub(1)),
-            Some(GitListEntry::Header(..))
+            Some(GitListEntry::Header(..) | GitListEntry::RepoHeader(..))
         ) && new_index == 0
         {
             return;
         }
 
-        if matches!(self.entries.get(new_index), Some(GitListEntry::Header(..))) {
+        if matches!(
+            self.entries.get(new_index),
+            Some(GitListEntry::Header(..) | GitListEntry::RepoHeader(..))
+        ) {
             self.selected_entry = match &self.view_mode {
                 GitPanelViewMode::Flat => Some(new_index.saturating_sub(1)),
                 GitPanelViewMode::Tree(tree_view_state) => {
@@ -1491,7 +1508,10 @@ impl GitPanel {
             }
         };
 
-        if matches!(self.entries.get(new_index), Some(GitListEntry::Header(..))) {
+        if matches!(
+            self.entries.get(new_index),
+            Some(GitListEntry::Header(..) | GitListEntry::RepoHeader(..))
+        ) {
             self.selected_entry = Some(new_index.saturating_add(1));
         } else {
             self.selected_entry = Some(new_index);
@@ -1637,7 +1657,7 @@ impl GitPanel {
                 .get(self.selected_entry?)?
                 .status_entry()?
                 .clone();
-            let repository = self.active_repository.clone()?;
+            let repository = self.repository_with_id(entry.repo_id, cx)?;
 
             SoloDiffView::open_or_focus(entry, repository, self.workspace.clone(), window, cx)
                 .detach_and_notify_err(self.workspace.clone(), window, cx);
@@ -1649,9 +1669,8 @@ impl GitPanel {
     fn view_file(&mut self, _: &ViewFile, window: &mut Window, cx: &mut Context<Self>) {
         maybe!({
             let entry = self.entries.get(self.selected_entry?)?.status_entry()?;
-            let project_path = self
-                .active_repository
-                .as_ref()?
+            let repository = self.repository_with_id(entry.repo_id, cx)?;
+            let project_path = repository
                 .read(cx)
                 .repo_path_to_project_path(&entry.repo_path, cx)?;
 
@@ -1830,7 +1849,7 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) {
         maybe!({
-            let active_repo = self.active_repository.clone()?;
+            let active_repo = self.repository_with_id(entry.repo_id, cx)?;
             let path = active_repo
                 .read(cx)
                 .repo_path_to_project_path(&entry.repo_path, cx)?;
@@ -2189,7 +2208,16 @@ impl GitPanel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_repository) = self.active_repository.clone() else {
+        // Resolve the entry's own repository so staging works in the aggregated
+        // "all repositories" view; fall back to the active repo otherwise.
+        let target_repository = match entry {
+            GitListEntry::Status(status_entry) => self.repository_with_id(status_entry.repo_id, cx),
+            GitListEntry::TreeStatus(status_entry) => {
+                self.repository_with_id(status_entry.entry.repo_id, cx)
+            }
+            _ => self.active_repository.clone(),
+        };
+        let Some(active_repository) = target_repository else {
             return;
         };
         let mut set_anchor: Option<RepoPath> = None;
@@ -2250,6 +2278,7 @@ impl GitPanel {
 
                     (goal_staged_state, entries)
                 }
+                GitListEntry::RepoHeader(_) => return,
                 GitListEntry::Directory(entry) => {
                     let goal_staged_state = match self.stage_status_for_directory(entry, repo) {
                         StageStatus::Staged => StageStatus::Unstaged,
@@ -2293,7 +2322,13 @@ impl GitPanel {
         entries: Vec<GitStatusEntry>,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_repository) = self.active_repository.clone() else {
+        // Stage against the entries' own repository (they come from one repo per
+        // call), so this works in the aggregated "all repositories" view.
+        let Some(active_repository) = entries
+            .first()
+            .and_then(|entry| self.repository_with_id(entry.repo_id, cx))
+            .or_else(|| self.active_repository.clone())
+        else {
             return;
         };
         cx.spawn({
@@ -4142,6 +4177,7 @@ impl GitPanel {
         let settings = GitPanelSettings::get_global(cx);
         let sort_by = settings.sort_by;
         let group_by_status = settings.group_by == GitPanelGroupBy::Status;
+        let show_all_repositories = settings.show_all_repositories;
         let is_tree_view = matches!(self.view_mode, GitPanelViewMode::Tree(_));
 
         if let Some(active_repo) = self.active_repository.as_ref() {
@@ -4167,6 +4203,11 @@ impl GitPanel {
                 })
             })
             .detach_and_log_err(cx);
+        }
+
+        if show_all_repositories {
+            self.build_all_repos_entries(sort_by, group_by_status, path_style, window, cx);
+            return;
         }
 
         let mut changed_entries = Vec::new();
@@ -4204,6 +4245,7 @@ impl GitPanel {
             }
 
             let entry = GitStatusEntry {
+                repo_id: repo.id,
                 repo_path: entry.repo_path.clone(),
                 status: entry.status,
                 staging,
@@ -4241,6 +4283,7 @@ impl GitPanel {
                 self.single_staged_entry =
                     repo.status_for_path(&ops.repo_path)
                         .map(|status| GitStatusEntry {
+                            repo_id: repo.id,
                             repo_path: ops.repo_path.clone(),
                             status: status.status,
                             staging: StageStatus::Staged,
@@ -4397,6 +4440,177 @@ impl GitPanel {
         let suggested_commit_message = self.suggest_commit_message(cx);
         let placeholder_text = suggested_commit_message.unwrap_or("Enter commit message".into());
 
+        self.commit_editor.update(cx, |editor, cx| {
+            editor.set_placeholder_text(&placeholder_text, window, cx)
+        });
+
+        cx.notify();
+    }
+
+    /// Builds the panel entry list aggregating changes from every open
+    /// repository, each under a repo-name header. Flat layout only. Used when
+    /// the `show_all_repositories` setting is enabled.
+    fn build_all_repos_entries(
+        &mut self,
+        sort_by: GitPanelSortBy,
+        group_by_status: bool,
+        path_style: PathStyle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Keep the active repo's stash for the commit UI.
+        if let Some(active) = self.active_repository.as_ref() {
+            self.stash_entries = active.read(cx).cached_stash();
+        }
+
+        let git_store = self.project.read(cx).git_store().clone();
+        let mut repos: Vec<Entity<Repository>> = git_store
+            .read(cx)
+            .repositories()
+            .values()
+            .cloned()
+            .collect();
+        repos.sort_by(|a, b| {
+            a.read(cx)
+                .work_directory_abs_path
+                .cmp(&b.read(cx).work_directory_abs_path)
+        });
+
+        let mut max_width_estimate = 0usize;
+        let mut max_width_item_index = None;
+
+        for repo_entity in repos {
+            let repo = repo_entity.read(cx);
+            let repo_id = repo.id;
+
+            let mut conflict_entries = Vec::new();
+            let mut new_entries = Vec::new();
+            let mut changed_entries = Vec::new();
+
+            for entry in repo.cached_status() {
+                self.changes_count += 1;
+                let is_conflict = repo.had_conflict_on_last_merge_head_change(&entry.repo_path);
+                let is_new = entry.status.is_created();
+                let staging = entry.status.staging();
+
+                if let Some(pending) = repo.pending_ops_for_path(&entry.repo_path)
+                    && pending
+                        .ops
+                        .iter()
+                        .any(|op| op.git_status == pending_op::GitStatus::Reverted && op.finished())
+                {
+                    continue;
+                }
+
+                let status_entry = GitStatusEntry {
+                    repo_id,
+                    repo_path: entry.repo_path.clone(),
+                    status: entry.status,
+                    staging,
+                    diff_stat: entry.diff_stat,
+                };
+
+                self.entry_count += 1;
+                if let Some(diff_stat) = status_entry.diff_stat {
+                    self.diff_stat_total.added =
+                        self.diff_stat_total.added.saturating_add(diff_stat.added);
+                    self.diff_stat_total.deleted = self
+                        .diff_stat_total
+                        .deleted
+                        .saturating_add(diff_stat.deleted);
+                }
+                let is_staged = GitPanel::stage_status_for_entry(&status_entry, repo)
+                    .as_bool()
+                    .unwrap_or(true);
+                if is_conflict {
+                    self.conflicted_count += 1;
+                    if is_staged {
+                        self.conflicted_staged_count += 1;
+                    }
+                } else if is_new {
+                    self.new_count += 1;
+                    if is_staged {
+                        self.new_staged_count += 1;
+                    }
+                } else {
+                    self.tracked_count += 1;
+                    if is_staged {
+                        self.tracked_staged_count += 1;
+                    }
+                }
+
+                if group_by_status && is_conflict {
+                    conflict_entries.push(status_entry);
+                } else if group_by_status && is_new {
+                    new_entries.push(status_entry);
+                } else {
+                    changed_entries.push(status_entry);
+                }
+            }
+
+            if conflict_entries.is_empty() && new_entries.is_empty() && changed_entries.is_empty() {
+                continue;
+            }
+
+            let sort_entries = |entries: &mut Vec<GitStatusEntry>| match sort_by {
+                GitPanelSortBy::Path => entries.sort_by(|a, b| a.repo_path.cmp(&b.repo_path)),
+                GitPanelSortBy::Name => entries.sort_by(|a, b| {
+                    a.repo_path
+                        .file_name()
+                        .cmp(&b.repo_path.file_name())
+                        .then_with(|| a.repo_path.cmp(&b.repo_path))
+                }),
+            };
+            sort_entries(&mut conflict_entries);
+            sort_entries(&mut changed_entries);
+            sort_entries(&mut new_entries);
+
+            let name = repo
+                .work_directory_abs_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| repo.work_directory_abs_path.to_string_lossy().into_owned());
+            self.entries
+                .push(GitListEntry::RepoHeader(GitRepoHeaderEntry {
+                    repo_id,
+                    name: name.into(),
+                }));
+
+            let mut push_status = |this: &mut Self, entry: GitListEntry| {
+                if let Some(estimate) =
+                    this.width_estimate_for_list_entry(false, &entry, path_style)
+                    && estimate > max_width_estimate
+                {
+                    max_width_estimate = estimate;
+                    max_width_item_index = Some(this.entries.len());
+                }
+                if let Some(repo_path) = entry.status_entry().map(|status| status.repo_path.clone())
+                {
+                    this.entries_indices.insert(repo_path, this.entries.len());
+                }
+                this.entries.push(entry);
+            };
+
+            // Flat list under the repo header (no per-section sub-headers in the
+            // aggregated view — a section header carries no repo, so it would be
+            // ambiguous which repo it acts on). Keep conflict/tracked/untracked
+            // ordering within the repo.
+            for entry in conflict_entries
+                .into_iter()
+                .chain(changed_entries)
+                .chain(new_entries)
+            {
+                push_status(self, GitListEntry::Status(entry));
+            }
+        }
+
+        self.max_width_item_index = max_width_item_index;
+
+        self.select_first_entry_if_none(window, cx);
+        self.select_last_entry_if_out_of_bounds(window, cx);
+
+        let suggested_commit_message = self.suggest_commit_message(cx);
+        let placeholder_text = suggested_commit_message.unwrap_or("Enter commit message".into());
         self.commit_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(&placeholder_text, window, cx)
         });
@@ -4709,6 +4923,9 @@ impl GitPanel {
                 Some(Self::item_width_estimate(0, dir.name.len(), dir.depth))
             }
             GitListEntry::Header(_) => None,
+            GitListEntry::RepoHeader(header) => {
+                Some(Self::item_width_estimate(0, header.name.len(), 0))
+            }
         }
     }
 
@@ -6276,23 +6493,35 @@ impl GitPanel {
                                 }) {
                                     match &this.entries.get(ix) {
                                         Some(GitListEntry::Status(entry)) => {
+                                            let entry_repo =
+                                                this.repository_with_id(entry.repo_id, cx);
+                                            let entry_repo = match &entry_repo {
+                                                Some(r) => r.read(cx),
+                                                None => repo,
+                                            };
                                             items.push(this.render_status_entry(
                                                 ix,
                                                 entry,
                                                 0,
                                                 has_write_access,
-                                                repo,
+                                                entry_repo,
                                                 window,
                                                 cx,
                                             ));
                                         }
                                         Some(GitListEntry::TreeStatus(entry)) => {
+                                            let entry_repo =
+                                                this.repository_with_id(entry.entry.repo_id, cx);
+                                            let entry_repo = match &entry_repo {
+                                                Some(r) => r.read(cx),
+                                                None => repo,
+                                            };
                                             items.push(this.render_status_entry(
                                                 ix,
                                                 &entry.entry,
                                                 entry.depth,
                                                 has_write_access,
-                                                repo,
+                                                entry_repo,
                                                 window,
                                                 cx,
                                             ));
@@ -6314,6 +6543,9 @@ impl GitPanel {
                                                 window,
                                                 cx,
                                             ));
+                                        }
+                                        Some(GitListEntry::RepoHeader(header)) => {
+                                            items.push(this.render_repo_header(header, cx));
                                         }
                                         None => {}
                                     }
@@ -6449,6 +6681,39 @@ impl GitPanel {
                 })
                 .ok();
             })
+            .into_any_element()
+    }
+
+    /// Looks up an open repository entity by id, used to resolve which repo an
+    /// aggregated-view entry belongs to.
+    fn repository_with_id(&self, repo_id: RepositoryId, cx: &App) -> Option<Entity<Repository>> {
+        self.project
+            .read(cx)
+            .git_store()
+            .read(cx)
+            .repositories()
+            .get(&repo_id)
+            .cloned()
+    }
+
+    /// Renders the repository-name group header shown above each repo's changes
+    /// in the aggregated "all repositories" view.
+    fn render_repo_header(&self, header: &GitRepoHeaderEntry, cx: &Context<Self>) -> AnyElement {
+        h_flex()
+            .id(ElementId::Name(
+                format!("repo_header_{}", header.repo_id.to_proto()).into(),
+            ))
+            .h(self.list_item_height())
+            .w_full()
+            .px_3()
+            .gap_1p5()
+            .bg(cx.theme().colors().elevated_surface_background)
+            .child(
+                Icon::new(IconName::GitBranch)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(Label::new(header.name.clone()).size(LabelSize::Small))
             .into_any_element()
     }
 
@@ -8450,6 +8715,10 @@ mod tests {
         handle.await;
 
         let entries = panel.read_with(cx, |panel, _| panel.entries.clone());
+        let repo_id = entries
+            .iter()
+            .find_map(|entry| entry.status_entry().map(|status| status.repo_id))
+            .unwrap();
         pretty_assertions::assert_eq!(
             entries,
             [
@@ -8457,6 +8726,7 @@ mod tests {
                     header: Section::Tracked
                 }),
                 GitListEntry::Status(GitStatusEntry {
+                    repo_id,
                     repo_path: repo_path("crates/gpui/gpui.rs"),
                     status: StatusCode::Modified.worktree(),
                     staging: StageStatus::Unstaged,
@@ -8466,6 +8736,7 @@ mod tests {
                     }),
                 }),
                 GitListEntry::Status(GitStatusEntry {
+                    repo_id,
                     repo_path: repo_path("crates/util/util.rs"),
                     status: StatusCode::Modified.worktree(),
                     staging: StageStatus::Unstaged,
@@ -8483,6 +8754,10 @@ mod tests {
         cx.executor().advance_clock(2 * UPDATE_DEBOUNCE);
         handle.await;
         let entries = panel.read_with(cx, |panel, _| panel.entries.clone());
+        let repo_id = entries
+            .iter()
+            .find_map(|entry| entry.status_entry().map(|status| status.repo_id))
+            .unwrap();
         pretty_assertions::assert_eq!(
             entries,
             [
@@ -8490,6 +8765,7 @@ mod tests {
                     header: Section::Tracked
                 }),
                 GitListEntry::Status(GitStatusEntry {
+                    repo_id,
                     repo_path: repo_path("crates/gpui/gpui.rs"),
                     status: StatusCode::Modified.worktree(),
                     staging: StageStatus::Unstaged,
@@ -8499,6 +8775,7 @@ mod tests {
                     }),
                 }),
                 GitListEntry::Status(GitStatusEntry {
+                    repo_id,
                     repo_path: repo_path("crates/util/util.rs"),
                     status: StatusCode::Modified.worktree(),
                     staging: StageStatus::Unstaged,
