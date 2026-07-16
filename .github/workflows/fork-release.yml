@@ -131,5 +131,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create "$env:RELEASE_TAG" --title "$env:RELEASE_TAG" --notes "Fork build" --draft --clobber
+          # `gh release create` has no --clobber flag and errors if the release
+          # already exists (e.g. a re-run, or the mac job created it first), so
+          # only create it when missing, then upload the installer replacing any
+          # previous asset. This keeps the step idempotent across re-runs.
+          gh release view "$env:RELEASE_TAG" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:RELEASE_TAG" --title "$env:RELEASE_TAG" --notes "Fork build" --draft
+          }
           gh release upload "$env:RELEASE_TAG" dist/ZedFork-windows-x64.exe --clobber
