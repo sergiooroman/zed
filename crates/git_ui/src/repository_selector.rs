@@ -19,7 +19,7 @@ pub fn open(
 ) {
     let project = workspace.project().clone();
     workspace.toggle_modal(window, cx, |window, cx| {
-        RepositorySelector::new(project, rems(34.), window, cx)
+        RepositorySelector::new(project, None, rems(34.), window, cx)
     })
 }
 
@@ -30,6 +30,7 @@ pub struct RepositorySelector {
 impl RepositorySelector {
     pub fn new(
         project_handle: Entity<Project>,
+        active_repository_override: Option<Entity<Repository>>,
         width: Rems,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -49,7 +50,8 @@ impl RepositorySelector {
         });
         let filtered_repositories = repository_entries.clone();
 
-        let active_repository = git_store.read(cx).active_repository();
+        let active_repository =
+            active_repository_override.or_else(|| git_store.read(cx).active_repository());
         let selected_index = active_repository
             .as_ref()
             .and_then(|active| filtered_repositories.iter().position(|repo| repo == active))

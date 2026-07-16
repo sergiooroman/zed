@@ -336,7 +336,22 @@ impl ProjectDiff {
                 "Action"
             }
         );
-        let intended_repo = workspace.project().read(cx).active_repository(cx);
+        // When opened for a specific entry (e.g. from the git panel's aggregated
+        // all-repositories view), scope the diff to that entry's repository
+        // rather than the active one.
+        let intended_repo = entry
+            .as_ref()
+            .and_then(|entry| {
+                workspace
+                    .project()
+                    .read(cx)
+                    .git_store()
+                    .read(cx)
+                    .repositories()
+                    .get(&entry.repo_id)
+                    .cloned()
+            })
+            .or_else(|| workspace.project().read(cx).active_repository(cx));
 
         let existing = workspace
             .items_of_type::<Self>(cx)
@@ -634,6 +649,26 @@ impl ProjectDiff {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Switch the diff to the entry's repository if it differs — the git
+        // panel's aggregated "all repositories" view can select entries from any
+        // open repo, and this keeps the diff (and the active-repo selector) in
+        // sync with the selection.
+        let current_repo_id = self.branch_diff.read(cx).repo().map(|repo| repo.read(cx).id);
+        if current_repo_id != Some(entry.repo_id)
+            && let Some(repo) = self
+                .project
+                .read(cx)
+                .git_store()
+                .read(cx)
+                .repositories()
+                .get(&entry.repo_id)
+                .cloned()
+        {
+            self.branch_diff.update(cx, |branch_diff, cx| {
+                branch_diff.set_repo(Some(repo), cx);
+            });
+        }
+
         let Some(git_repo) = self.branch_diff.read(cx).repo() else {
             return;
         };

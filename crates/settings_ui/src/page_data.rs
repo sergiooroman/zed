@@ -5840,7 +5840,7 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
-    fn git_panel_section() -> [SettingsPageItem; 17] {
+    fn git_panel_section() -> [SettingsPageItem; 18] {
         [
             SettingsPageItem::SectionHeader("Git Panel"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -5994,6 +5994,29 @@ fn panels_page() -> SettingsPage {
                     },
                     write: |settings_content, value, _| {
                         settings_content.git_panel.get_or_insert_default().tree_view = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show All Repositories",
+                description: "Show changes from all open repositories at once, grouped by repository, instead of only the active one.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("git_panel.show_all_repositories"),
+                    pick: |settings_content| {
+                        settings_content
+                            .git_panel
+                            .as_ref()?
+                            .show_all_repositories
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .git_panel
+                            .get_or_insert_default()
+                            .show_all_repositories = value;
                     },
                 }),
                 metadata: None,

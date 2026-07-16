@@ -925,6 +925,8 @@ impl GitPanel {
             let mut was_file_icons = GitPanelSettings::get_global(cx).file_icons;
             let mut was_folder_icons = GitPanelSettings::get_global(cx).folder_icons;
             let mut was_diff_stats = GitPanelSettings::get_global(cx).diff_stats;
+            let mut was_show_all_repositories =
+                GitPanelSettings::get_global(cx).show_all_repositories;
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
                 let settings = GitPanelSettings::get_global(cx);
                 let sort_by = settings.sort_by;
@@ -949,8 +951,12 @@ impl GitPanel {
                     }
                 }
 
+                let show_all_repositories = settings.show_all_repositories;
                 let mut update_entries = false;
-                if sort_by != was_sort_by || group_by != was_group_by || tree_view != was_tree_view
+                if sort_by != was_sort_by
+                    || group_by != was_group_by
+                    || tree_view != was_tree_view
+                    || show_all_repositories != was_show_all_repositories
                 {
                     this.bulk_staging.take();
                     update_entries = true;
@@ -967,6 +973,7 @@ impl GitPanel {
                 was_file_icons = file_icons;
                 was_folder_icons = folder_icons;
                 was_diff_stats = diff_stats;
+                was_show_all_repositories = show_all_repositories;
             })
             .detach();
 
@@ -1014,9 +1021,19 @@ impl GitPanel {
                     GitStoreEvent::RepositoryUpdated(
                         _,
                         RepositoryEvent::StatusesChanged | RepositoryEvent::HeadChanged,
-                        true,
-                    )
-                    | GitStoreEvent::RepositoryAdded
+                        is_active_repo,
+                    ) => {
+                        // Normally only the active repo's changes drive the panel.
+                        // In the aggregated "all repositories" view, react to every
+                        // repo's status change so their changes show without having
+                        // to select each repo first.
+                        if *is_active_repo
+                            || GitPanelSettings::get_global(cx).show_all_repositories
+                        {
+                            this.schedule_update(window, cx);
+                        }
+                    }
+                    GitStoreEvent::RepositoryAdded
                     | GitStoreEvent::RepositoryRemoved(_)
                     | GitStoreEvent::GlobalConfigurationUpdated
                     | GitStoreEvent::ActiveRepositoryChanged(_) => {
@@ -1107,9 +1124,20 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(git_repo) = self.active_repository.as_ref() else {
+        // Find the repository that actually contains this path (not necessarily
+        // the active one), so selection sync works in the aggregated view.
+        let git_store = self.project.read(cx).git_store().clone();
+        let git_repo = git_store
+            .read(cx)
+            .repositories()
+            .values()
+            .find(|repo| repo.read(cx).project_path_to_repo_path(&path, cx).is_some())
+            .cloned()
+            .or_else(|| self.active_repository.clone());
+        let Some(git_repo) = git_repo else {
             return;
         };
+        let repo_id = git_repo.read(cx).id;
 
         let (repo_path, section) = {
             let repo = git_repo.read(cx);
@@ -1155,7 +1183,13 @@ impl GitPanel {
             self.update_visible_entries(window, cx);
         }
 
-        let Some(ix) = self.entry_by_path(&repo_path) else {
+        // Match on (repo_id, repo_path) so files with the same path in different
+        // repos don't collide in the aggregated view.
+        let Some(ix) = self.entries.iter().position(|entry| {
+            entry
+                .status_entry()
+                .is_some_and(|status| status.repo_id == repo_id && status.repo_path == repo_path)
+        }) else {
             return;
         };
 
@@ -1619,7 +1653,7 @@ impl GitPanel {
         maybe!({
             let entry = self.entries.get(self.selected_entry?)?.status_entry()?;
             let workspace = self.workspace.upgrade()?;
-            let git_repo = self.active_repository.as_ref()?;
+            let git_repo = self.repository_with_id(entry.repo_id, cx)?;
 
             if let Some(project_diff) = workspace.read(cx).active_item_as::<ProjectDiff>(cx)
                 && let Some(project_path) = project_diff.read(cx).active_project_path(cx)
@@ -1692,8 +1726,9 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let entry_primary_click_action =
-            GitPanelSettings::get_global(cx).entry_primary_click_action;
+        let settings = GitPanelSettings::get_global(cx);
+        let entry_primary_click_action = settings.entry_primary_click_action;
+        let show_all_repositories = settings.show_all_repositories;
         let action = match (entry_primary_click_action, secondary) {
             (GitPanelClickBehavior::ProjectDiff, false) => GitPanelClickBehavior::ProjectDiff,
             (GitPanelClickBehavior::ProjectDiff, true) => GitPanelClickBehavior::FileDiff,
@@ -1713,6 +1748,27 @@ impl GitPanel {
             GitPanelClickBehavior::ViewFile => {
                 self.view_file(&Default::default(), window, cx);
             }
+        }
+
+        // In the aggregated "all repositories" view, make the title bar's repo /
+        // branch selector and commit target follow the clicked file's repo. This
+        // is deferred so it runs *after* the workspace's active-item sync, which
+        // fires later in the effect cycle and would otherwise clobber the active
+        // repository with the Project Diff's lagging path while it switches repos.
+        if show_all_repositories
+            && let Some((repo_id, repo_path)) = self
+                .get_selected_entry()
+                .and_then(|entry| entry.status_entry())
+                .map(|status| (status.repo_id, status.repo_path.clone()))
+            && let Some(repo) = self.repository_with_id(repo_id, cx)
+            && let Some(project_path) = repo.read(cx).repo_path_to_project_path(&repo_path, cx)
+        {
+            let git_store = self.project.read(cx).git_store().clone();
+            cx.defer(move |cx| {
+                git_store.update(cx, |git_store, cx| {
+                    git_store.set_active_repo_for_path(&project_path, cx);
+                });
+            });
         }
     }
 
@@ -2649,7 +2705,7 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_repository) = self.active_repository.clone() else {
+        let Some(active_repository) = self.footer_repository(cx) else {
             return;
         };
         let error_spawn = |message, window: &mut Window, cx: &mut App| {
@@ -5372,12 +5428,26 @@ impl GitPanel {
         )
     }
 
+    /// The repository the footer (branch, commit) acts on. In the aggregated
+    /// "all repositories" view this deterministically follows the selected
+    /// entry's repo, so it never lags behind the asynchronous diff/active-repo
+    /// sync. Falls back to the active repository otherwise.
+    fn footer_repository(&self, cx: &App) -> Option<Entity<Repository>> {
+        if GitPanelSettings::get_global(cx).show_all_repositories
+            && let Some(entry) = self.get_selected_entry().and_then(|e| e.status_entry())
+            && let Some(repo) = self.repository_with_id(entry.repo_id, cx)
+        {
+            return Some(repo);
+        }
+        self.active_repository.clone()
+    }
+
     pub fn render_footer(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
-        let active_repository = self.active_repository.clone()?;
+        let active_repository = self.footer_repository(cx)?;
         let settings = ThemeSettings::get_global(cx);
         let panel_editor_style =
             git_commit_editor_style(settings.git_commit_buffer_font_size(cx), cx);
@@ -6403,10 +6473,24 @@ impl GitPanel {
         _: &Window,
         cx: &App,
     ) -> Option<AnyElement> {
-        let repo = self.active_repository.as_ref()?.read(cx);
         let project_path = (file.worktree_id(cx), file.path().clone()).into();
-        let repo_path = repo.project_path_to_repo_path(&project_path, cx)?;
-        let ix = self.entry_by_path(&repo_path)?;
+        // Resolve the repository from the file's own path rather than the panel's
+        // active repository: in the aggregated "all repositories" view the diff can
+        // show a file from any open repo, and the active repository lags one step
+        // behind the selection, which would hide the checkbox for the shown file.
+        let (repo_entity, repo_path) = self
+            .project
+            .read(cx)
+            .git_store()
+            .read(cx)
+            .repository_and_path_for_project_path(&project_path, cx)?;
+        let repo_id = repo_entity.read(cx).id;
+        let repo = repo_entity.read(cx);
+        let ix = self.entries.iter().position(|entry| {
+            entry
+                .status_entry()
+                .is_some_and(|status| status.repo_id == repo_id && status.repo_path == repo_path)
+        })?;
         let entry = self.entries.get(ix)?;
 
         let is_staging_or_staged = repo
@@ -6545,7 +6629,11 @@ impl GitPanel {
                                             ));
                                         }
                                         Some(GitListEntry::RepoHeader(header)) => {
-                                            items.push(this.render_repo_header(header, cx));
+                                            items.push(this.render_repo_header(
+                                                header,
+                                                has_write_access,
+                                                cx,
+                                            ));
                                         }
                                         None => {}
                                     }
@@ -6696,24 +6784,109 @@ impl GitPanel {
             .cloned()
     }
 
+    /// Aggregate staged state across all entries of a repo, for its header
+    /// checkbox: Selected when all staged, Unselected when none, Indeterminate
+    /// otherwise.
+    fn repo_header_state(&self, repo_id: RepositoryId, cx: &App) -> ToggleState {
+        let Some(repo) = self.repository_with_id(repo_id, cx) else {
+            return ToggleState::Unselected;
+        };
+        let repo = repo.read(cx);
+        let mut total = 0;
+        let mut staged = 0;
+        for entry in self
+            .entries
+            .iter()
+            .filter_map(|entry| entry.status_entry())
+            .filter(|entry| entry.repo_id == repo_id)
+        {
+            total += 1;
+            if GitPanel::stage_status_for_entry(entry, repo)
+                .as_bool()
+                .unwrap_or(false)
+            {
+                staged += 1;
+            }
+        }
+        if total == 0 || staged == 0 {
+            ToggleState::Unselected
+        } else if staged == total {
+            ToggleState::Selected
+        } else {
+            ToggleState::Indeterminate
+        }
+    }
+
+    /// Stage (or unstage, if already fully staged) every change of the given
+    /// repository, from its aggregated-view header checkbox.
+    fn toggle_staged_for_repo(&mut self, repo_id: RepositoryId, cx: &mut Context<Self>) {
+        let goal_staged = !self.repo_header_state(repo_id, cx).selected();
+        let entries: Vec<GitStatusEntry> = self
+            .entries
+            .iter()
+            .filter_map(|entry| entry.status_entry())
+            .filter(|entry| entry.repo_id == repo_id)
+            .cloned()
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        self.change_file_stage(goal_staged, entries, cx);
+    }
+
     /// Renders the repository-name group header shown above each repo's changes
-    /// in the aggregated "all repositories" view.
-    fn render_repo_header(&self, header: &GitRepoHeaderEntry, cx: &Context<Self>) -> AnyElement {
+    /// in the aggregated "all repositories" view, with a checkbox to stage or
+    /// unstage all of that repo's changes.
+    fn render_repo_header(
+        &self,
+        header: &GitRepoHeaderEntry,
+        has_write_access: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let repo_id = header.repo_id;
+        let toggle_state = self.repo_header_state(repo_id, cx);
+        let checkbox_id: ElementId =
+            ElementId::Name(format!("repo_header_{}_checkbox", repo_id.to_proto()).into());
+        let weak = cx.weak_entity();
         h_flex()
             .id(ElementId::Name(
-                format!("repo_header_{}", header.repo_id.to_proto()).into(),
+                format!("repo_header_{}", repo_id.to_proto()).into(),
             ))
+            .cursor_pointer()
             .h(self.list_item_height())
             .w_full()
-            .px_3()
-            .gap_1p5()
+            .pl_3()
+            .pr_1()
+            .gap_2()
+            .justify_between()
             .bg(cx.theme().colors().elevated_surface_background)
+            .hover(|s| s.bg(cx.theme().colors().ghost_element_hover))
             .child(
-                Icon::new(IconName::GitBranch)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
+                h_flex()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::GitBranch)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(Label::new(header.name.clone()).size(LabelSize::Small)),
             )
-            .child(Label::new(header.name.clone()).size(LabelSize::Small))
+            .child(
+                Checkbox::new(checkbox_id, toggle_state)
+                    .disabled(!has_write_access)
+                    .fill()
+                    .elevation(ElevationIndex::Surface),
+            )
+            .on_click(move |_, _window, cx| {
+                if !has_write_access {
+                    return;
+                }
+                weak.update(cx, |this, cx| {
+                    this.toggle_staged_for_repo(repo_id, cx);
+                    cx.stop_propagation();
+                })
+                .ok();
+            })
             .into_any_element()
     }
 
@@ -7853,7 +8026,11 @@ impl RenderOnce for PanelRepoFooter {
             .as_ref()
             .map(|panel| {
                 let panel = panel.read(cx);
-                (panel.workspace.clone(), panel.active_repository.clone())
+                // Use the footer repository (the selected entry's repo in the
+                // aggregated view) so the branch and repository switchers target
+                // the repo the user is actually looking at, not the lagging active
+                // repository.
+                (panel.workspace.clone(), panel.footer_repository(cx))
             })
             .unzip();
 
@@ -7884,9 +8061,19 @@ impl RenderOnce for PanelRepoFooter {
         let repo_selector = PopoverMenu::new("repository-switcher")
             .menu({
                 let project = project;
+                let active_repo_override = repo.clone().flatten();
                 move |window, cx| {
                     let project = project.clone()?;
-                    Some(cx.new(|cx| RepositorySelector::new(project, rems(20.), window, cx)))
+                    let active_repo_override = active_repo_override.clone();
+                    Some(cx.new(|cx| {
+                        RepositorySelector::new(
+                            project,
+                            active_repo_override,
+                            rems(20.),
+                            window,
+                            cx,
+                        )
+                    }))
                 }
             })
             .trigger_with_tooltip(
