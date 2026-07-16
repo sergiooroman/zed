@@ -8636,6 +8636,16 @@ impl Repository {
         self.pending_ops = updated;
     }
 
+    /// Forces an immediate recomputation of this repository's branch, head
+    /// commit and status snapshot. Git mutations normally rely on the filesystem
+    /// watcher to notice `.git` changes, but that can lag or miss `.git/HEAD`
+    /// updates for ref changes triggered from within Zed (e.g. checking out a
+    /// branch from the git graph), leaving the cached branch stale. Callers that
+    /// change refs can use this to refresh the cached snapshot deterministically.
+    pub fn schedule_status_refresh(&mut self, cx: &mut Context<Self>) {
+        self.schedule_scan(None, cx);
+    }
+
     fn schedule_scan(
         &mut self,
         updates_tx: Option<mpsc::UnboundedSender<DownstreamUpdate>>,

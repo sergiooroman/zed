@@ -2652,10 +2652,22 @@ impl GitGraph {
         cx.spawn(async move |this, cx| {
             match receiver.await {
                 Ok(Ok(())) => {
-                    // Refresh the graph right away rather than waiting for the
-                    // file watcher to notice the change; ref updates like tag
-                    // edits produce no repository event at all.
-                    this.update(cx, |this, cx| this.reload_graph(cx)).ok();
+                    // Refresh right away rather than waiting for the file watcher
+                    // to notice the change; ref updates like tag edits produce no
+                    // repository event at all, and checkouts can change `.git/HEAD`
+                    // faster than the watcher reacts. Recompute the repository's
+                    // branch/status snapshot so the branch selector, title bar and
+                    // the graph's checked-out marker all follow, then reload the
+                    // graph log itself.
+                    this.update(cx, |this, cx| {
+                        if let Some(repository) = this.get_repository(cx) {
+                            repository.update(cx, |repository, cx| {
+                                repository.schedule_status_refresh(cx);
+                            });
+                        }
+                        this.reload_graph(cx);
+                    })
+                    .ok();
                 }
                 Ok(Err(error)) => {
                     if let Some(workspace) = workspace.upgrade() {
