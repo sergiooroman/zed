@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
 $buildSuccess = $false
+$canCodeSign = $false
 
 $OSArchitecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
     "X64" { "x86_64" }
@@ -40,15 +41,7 @@ function Get-VSArch {
 }
 
 Push-Location
-# Locate the Visual Studio install with vswhere so this works across editions
-# (Community/Professional/Enterprise) and CI runners, instead of a hardcoded path.
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (Test-Path $vswhere) {
-    $vsInstallPath = & $vswhere -latest -products * -property installationPath
-} else {
-    $vsInstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Community"
-}
-& "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
 Pop-Location
 
 $target = "$Architecture-pc-windows-msvc"
@@ -69,29 +62,36 @@ $env:ZED_RELEASE_CHANNEL = $channel
 $env:RELEASE_CHANNEL = $channel
 Pop-Location
 
-# Only sign when running in CI with the Azure Key Vault credentials present.
-# The fork build ships unsigned, so signing is skipped when they are absent.
-$script:ShouldSign = [bool]$env:CI -and [bool]$env:AZURE_TENANT_ID
-
 function CheckEnvironmentVariables {
     if(-not $env:CI) {
         return
     }
 
     $requiredVars = @('ZED_WORKSPACE', 'RELEASE_VERSION', 'ZED_RELEASE_CHANNEL')
-    if ($script:ShouldSign) {
-        $requiredVars += @(
-            'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
-            'ACCOUNT_NAME', 'CERT_PROFILE_NAME', 'ENDPOINT',
-            'FILE_DIGEST', 'TIMESTAMP_DIGEST', 'TIMESTAMP_SERVER'
-        )
-    }
 
     foreach ($var in $requiredVars) {
-        if (-not (Test-Path "env:$var")) {
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($var))) {
             Write-Error "$var is not set"
             exit 1
         }
+    }
+
+    # On PRs from forks the signing secrets are not populated,
+    # so skip code signing instead of failing, like bundle-mac does.
+    $signingVars = @(
+        'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+        'ACCOUNT_NAME', 'CERT_PROFILE_NAME', 'ENDPOINT',
+        'FILE_DIGEST', 'TIMESTAMP_DIGEST', 'TIMESTAMP_SERVER'
+    )
+
+    $missingVars = @($signingVars | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+    if ($missingVars.Count -eq 0) {
+        $script:canCodeSign = $true
+    } else {
+        Write-Host "====== WARNING ======"
+        Write-Host "One or more of the following variables are missing: $($missingVars -join ', ')"
+        Write-Host "This bundle will not be code signed"
+        Write-Host "====== WARNING ======"
     }
 }
 
@@ -142,7 +142,7 @@ function BuildRemoteServer {
     # Create zipped remote server binary
     $remoteServerSrc = (Resolve-Path ".\$CargoOutDir\remote_server.exe").Path
 
-    if ($script:ShouldSign) {
+    if ($canCodeSign) {
         Write-Output "Code signing remote_server.exe"
         & "$innoDir\sign.ps1" $remoteServerSrc
     }
@@ -173,7 +173,7 @@ function UploadToSentry {
         Write-Output "install with: 'winget install -e --id=Sentry.sentry-cli'"
         return
     }
-    if (-not (Test-Path "env:SENTRY_AUTH_TOKEN")) {
+    if ([string]::IsNullOrWhiteSpace($env:SENTRY_AUTH_TOKEN)) {
         Write-Output "missing SENTRY_AUTH_TOKEN. skipping sentry upload."
         return
     }
@@ -207,18 +207,14 @@ function MakeAppx {
         }
     }
     Copy-Item -Path "$manifestFile" -Destination "$innoDir\make_appx\AppxManifest.xml"
-    # Locate makeappx.exe across installed Windows SDK versions (newest first)
-    # instead of assuming one specific SDK build, which varies by runner.
-    $makeAppx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if (-not $makeAppx) {
-        throw "makeappx.exe not found in any Windows SDK bin directory"
-    }
-    & $makeAppx.FullName pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
+    # Add makeAppx.exe to Path
+    $sdk = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
+    $env:Path += ';' + $sdk
+    makeAppx.exe pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
 }
 
 function SignZedAndItsFriends {
-    if (-not $script:ShouldSign) {
+    if (-not $canCodeSign) {
         return
     }
 
@@ -310,22 +306,17 @@ function BuildInstaller {
             $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "dev" {
-            # Fork branding: user-visible names and a distinct install identity so
-            # it doesn't share an uninstall entry with official Zed. The AppX
-            # identity (AppUserId/AppxFullName) and mutex stay as-is because they
-            # are coupled to the packaged AppxManifest and the Rust single-instance
-            # code; changing them would break packaging without a custom manifest.
-            $appId = "{{9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680}"
+            $appId = "{{8357632E-24A4-4F32-BA97-E575B4D1FE5D}"
             $appIconName = "app-icon-dev"
-            $appName = "Zed Fork"
-            $appDisplayName = "Zed Fork"
+            $appName = "Zed Dev"
+            $appDisplayName = "Zed Dev"
             $appSetupName = "Zed-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zed-Dev-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedFork"
+            $regValueName = "ZedDev"
             $appUserId = "ZedIndustries.Zed.Dev"
-            $appShellNameShort = "Zed &Fork"
+            $appShellNameShort = "Z&ed Dev"
             $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
         }
         default {
@@ -362,14 +353,10 @@ function BuildInstaller {
         $defs += "/d$key=`"$($definitions[$key])`""
     }
 
-    if (-not $script:ShouldSign) {
-        # The .iss sets `SignTool=Defaultsign`; Inno then requires every target
-        # to actually end up signed. For unsigned fork builds, strip that
-        # directive so Inno skips signing entirely.
-        (Get-Content $issFilePath) -notmatch '^\s*SignTool=' | Set-Content $issFilePath
-    }
     $innoArgs = @($issFilePath) + $defs
-    if($script:ShouldSign) {
+    if($canCodeSign) {
+        # Checked by zed.iss to decide whether to sign the installer.
+        $env:ZED_SIGN_BUNDLE = "1"
         $signTool = "powershell.exe -ExecutionPolicy Bypass -File $innoDir\sign.ps1 `$f"
         $innoArgs += "/sDefaultsign=`"$signTool`""
     }
