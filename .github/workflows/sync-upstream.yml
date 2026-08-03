@@ -69,7 +69,13 @@ jobs:
       - name: Open sync PR
         if: steps.check.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Opening a PR whose head lives in zed-industries/zed needs a token
+          # with access to BOTH repositories; GITHUB_TOKEN is scoped to this one
+          # and the call comes back "Resource not accessible by integration".
+          # Set a SYNC_PAT secret (a classic PAT with public_repo is enough) to
+          # let the schedule open the PR unattended. Without it the step still
+          # runs and fails loudly, which is the signal to open the PR by hand.
+          GH_TOKEN: ${{ secrets.SYNC_PAT || github.token }}
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           RELEASE_BRANCH="${{ steps.tag.outputs.release_branch }}"
@@ -80,6 +86,16 @@ jobs:
           # scope may be required") failed this job every Monday. A cross-fork
           # PR needs no push at all, so no elevated token is needed.
           # Conflicts, if any, surface on the PR for you to resolve.
-          gh pr create --base mvp-fork-dist --head "zed-industries:$RELEASE_BRANCH" \
-            --title "Sync upstream $TAG" \
-            --body "Brings in upstream Zed \`$TAG\` from the \`$RELEASE_BRANCH\` release branch. Review, resolve any conflicts, and merge; then cut a \`fork-v*\` tag to publish a build."
+          #
+          # Called through the API rather than `gh pr create` because that helper
+          # always asks for maintainer_can_modify, which cannot be granted on a
+          # head branch living in a repository we do not control, and the call
+          # fails outright ("Fork collab can't be granted by someone without
+          # permission").
+          gh api "repos/$GITHUB_REPOSITORY/pulls" -X POST \
+            -f title="Sync upstream $TAG" \
+            -f head="zed-industries:$RELEASE_BRANCH" \
+            -f base="mvp-fork-dist" \
+            -F maintainer_can_modify=false \
+            -f body="Brings in upstream Zed \`$TAG\` from the \`$RELEASE_BRANCH\` release branch. Review, resolve any conflicts, and merge; then cut a \`fork-v*\` tag to publish a build." \
+            --jq .html_url
