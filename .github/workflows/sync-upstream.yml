@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
@@ -28,11 +28,6 @@ jobs:
           ref: mvp-fork-dist
           fetch-depth: 0
 
-      - name: Configure git
-        run: |
-          git config user.name "fork-sync-bot"
-          git config user.email "actions@users.noreply.github.com"
-
       - name: Add upstream and fetch tags
         run: |
           git remote add upstream https://github.com/zed-industries/zed.git
@@ -40,15 +35,18 @@ jobs:
           # so a plain fetch would be rejected for "would clobber existing tag".
           git fetch --quiet --force upstream 'refs/tags/*:refs/tags/*'
 
-      - name: Determine latest upstream stable tag
+      - name: Determine latest upstream stable release
         id: tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="$(gh api repos/zed-industries/zed/releases/latest --jq .tag_name)"
-          echo "Latest upstream stable: $TAG"
+          # Upstream keeps a branch per release line (v1.13.2 lives on v1.13.x),
+          # and the PR is opened straight from it — see the note below.
+          RELEASE_BRANCH="${TAG%.*}.x"
+          echo "Latest upstream stable: $TAG (branch $RELEASE_BRANCH)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "branch=sync/upstream-$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether a sync is needed
         id: check
@@ -56,12 +54,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
-          BRANCH="${{ steps.tag.outputs.branch }}"
           if git merge-base --is-ancestor "refs/tags/$TAG" HEAD; then
             echo "Already integrated; nothing to do."
             echo "needed=false" >> "$GITHUB_OUTPUT"
-          elif git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            echo "Sync branch $BRANCH already exists (PR likely open); nothing to do."
+          elif gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+                 --search "Sync upstream $TAG in:title" --json number --jq 'length' \
+               | grep -qv '^0$'; then
+            echo "A sync PR for $TAG is already open; nothing to do."
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -73,12 +72,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
-          BRANCH="${{ steps.tag.outputs.branch }}"
-          # Push the upstream tag as a branch and open a PR against the fork.
-          # If the merge has conflicts, GitHub surfaces them on the PR for you to
-          # resolve; no separate issue is created.
-          git push origin "refs/tags/$TAG:refs/heads/$BRANCH"
-          gh pr create --base mvp-fork-dist --head "$BRANCH" \
+          RELEASE_BRANCH="${{ steps.tag.outputs.release_branch }}"
+          # Open the PR directly from upstream's own release branch rather than
+          # copying it into this fork first. Pushing it here would carry
+          # upstream's .github/workflows/ files, and GITHUB_TOKEN is not allowed
+          # to create or update workflow files — that rejection ("`workflows`
+          # scope may be required") failed this job every Monday. A cross-fork
+          # PR needs no push at all, so no elevated token is needed.
+          # Conflicts, if any, surface on the PR for you to resolve.
+          gh pr create --base mvp-fork-dist --head "zed-industries:$RELEASE_BRANCH" \
             --title "Sync upstream $TAG" \
-            --body "Brings in upstream Zed \`$TAG\`. Review, resolve any conflicts, and merge; then cut a \`fork-v*\` tag to publish a build." \
-            2>/dev/null || echo "PR for $BRANCH already exists."
+            --body "Brings in upstream Zed \`$TAG\` from the \`$RELEASE_BRANCH\` release branch. Review, resolve any conflicts, and merge; then cut a \`fork-v*\` tag to publish a build."
