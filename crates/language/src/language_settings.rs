@@ -553,6 +553,7 @@ pub enum EditPredictionPromptFormat {
     CodeGemma,
     Codestral,
     Glm,
+    Sweep,
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -577,6 +578,7 @@ impl From<EditPredictionPromptFormatContent> for EditPredictionPromptFormat {
             EditPredictionPromptFormatContent::CodeGemma => Self::CodeGemma,
             EditPredictionPromptFormatContent::Codestral => Self::Codestral,
             EditPredictionPromptFormatContent::Glm => Self::Glm,
+            EditPredictionPromptFormatContent::Sweep => Self::Sweep,
         }
     }
 }
@@ -892,7 +894,10 @@ impl settings::Settings for AllLanguageSettings {
 
             file_types.insert(
                 language.clone(),
-                (builder.build().unwrap(), patterns.0.clone()),
+                (
+                    builder.build().unwrap(),
+                    patterns.0.iter().cloned().collect(),
+                ),
             );
         }
 
