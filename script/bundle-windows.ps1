@@ -41,7 +41,16 @@ function Get-VSArch {
 }
 
 Push-Location
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
+# Locate the Visual Studio install with vswhere so this works across editions
+# (Community/Professional/Enterprise) and CI runners, instead of a hardcoded
+# path — GitHub's windows runners ship Enterprise, not Community.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vswhere) {
+    $vsInstallPath = & $vswhere -latest -products * -property installationPath
+} else {
+    $vsInstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Community"
+}
+& "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
 Pop-Location
 
 $target = "$Architecture-pc-windows-msvc"
@@ -207,10 +216,15 @@ function MakeAppx {
         }
     }
     Copy-Item -Path "$manifestFile" -Destination "$innoDir\make_appx\AppxManifest.xml"
-    # Add makeAppx.exe to Path
-    $sdk = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
-    $env:Path += ';' + $sdk
-    makeAppx.exe pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
+    # Locate makeappx.exe across installed Windows SDK versions (newest first)
+    # rather than pinning one: runners move to newer SDKs and a hardcoded version
+    # fails the build outright.
+    $makeAppx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $makeAppx) {
+        throw "makeappx.exe not found in any Windows SDK bin directory"
+    }
+    & $makeAppx.FullName pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
 }
 
 function SignZedAndItsFriends {
@@ -306,17 +320,23 @@ function BuildInstaller {
             $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "dev" {
-            $appId = "{{8357632E-24A4-4F32-BA97-E575B4D1FE5D}"
+            # The fork ships on the dev channel under its own name and product
+            # code so it doesn't share an uninstall entry with official Zed. The
+            # AppX identity (AppUserId/AppxFullName) and mutex stay as-is because
+            # they are coupled to the packaged AppxManifest and the Rust
+            # single-instance code; changing them would break packaging without a
+            # custom manifest.
+            $appId = "{{9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680}"
             $appIconName = "app-icon-dev"
-            $appName = "Zed Dev"
-            $appDisplayName = "Zed Dev"
+            $appName = "Zed Fork"
+            $appDisplayName = "Zed Fork"
             $appSetupName = "Zed-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zed-Dev-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedDev"
+            $regValueName = "ZedFork"
             $appUserId = "ZedIndustries.Zed.Dev"
-            $appShellNameShort = "Z&ed Dev"
+            $appShellNameShort = "Zed &Fork"
             $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
         }
         default {
