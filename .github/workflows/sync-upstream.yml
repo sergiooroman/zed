@@ -92,6 +92,11 @@ jobs:
             6. Push the branch and open a PR against mvp-fork-dist titled
                "Sync upstream ${{ steps.tag.outputs.tag }}".
 
+            Read CLAUDE.md first. Its opening section is binding: this is a fork,
+            and a sync must not drop any of its changes. If you cannot preserve a
+            fork change while taking upstream's, stop and say so in the PR body
+            rather than deciding for yourself.
+
             How to resolve conflicts:
 
             - Zed maintains each release line on its own branch, not one cumulative
