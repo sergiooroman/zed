@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Verifies that this fork's own changes survived a merge from upstream Zed.
+#
+# Syncing upstream regularly means resolving conflicts in files the fork has
+# customized, and taking upstream's side of a file wholesale silently drops
+# whatever the fork had added to it. That is not hypothetical: the v1.13.2 sync
+# discarded the Visual Studio lookup, the Windows SDK lookup and the fork's
+# installer identity in one go, and the first two only surfaced when the release
+# build failed. Run this after every sync, and in CI, so a dropped change is
+# caught before it ships.
+#
+# Each check is a marker for one fork change, not a full test of it. Add a check
+# whenever the fork customizes something new; drop one when upstream adopts the
+# same behaviour and the fork's version goes away.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+failures=0
+declare -a missing=()
+
+check() {
+    local description="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        printf '  ok    %s\n' "$description"
+    else
+        printf '  MISSING  %s\n' "$description"
+        missing+=("$description")
+        failures=$((failures + 1))
+    fi
+}
+
+# grep -q for a fixed string in a file, so callers stay readable.
+has() { grep -qF -- "$2" "$1"; }
+# grep -q for a regex.
+matches() { grep -qE -- "$2" "$1"; }
+
+echo "Distribution and branding"
+check "telemetry defaults are off" \
+    matches assets/settings/default.json '"diagnostics": false'
+check "telemetry metrics are off" \
+    matches assets/settings/default.json '"metrics": false'
+check "auto-update polls the fork's own manifest" \
+    has crates/auto_update/src/auto_update.rs 'zed.sergioroman.tech/update/'
+check "landing page and deployment config are present" \
+    test -f fork-dist/landing/index.html
+check "Windows installer identifies as the fork" \
+    has script/bundle-windows.ps1 '$appName = "Zed Fork"'
+check "Windows installer uses the fork's own product code" \
+    has script/bundle-windows.ps1 '9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680'
+
+echo "Build scripts"
+check "Visual Studio is located via vswhere, not a hardcoded edition" \
+    has script/bundle-windows.ps1 'vswhere.exe'
+check "makeappx is located across SDK versions, not a pinned one" \
+    matches script/bundle-windows.ps1 'Windows Kits.10.bin.\*.x64.makeappx\.exe'
+check "macOS bundle guards an empty features array under bash 3.2" \
+    has script/bundle-mac '${features_flag[@]+"${features_flag[@]}"}'
+check "remote_server exposes runtime_shaders for local mac builds" \
+    has crates/remote_server/Cargo.toml 'runtime_shaders'
+
+echo "CI workflows"
+check "fork release workflow is present" \
+    test -f .github/workflows/fork-release.yml
+check "upstream sync workflow is present" \
+    test -f .github/workflows/sync-upstream.yml
+check "Windows runner stays pinned to 2022" \
+    has .github/workflows/fork-release.yml 'windows-2022'
+check "license generation tolerates missing licenses" \
+    has .github/workflows/fork-release.yml 'ALLOW_MISSING_LICENSES'
+check "Windows long paths are enabled for deep git fixtures" \
+    matches .github/workflows/fork-release.yml 'longpaths'
+
+echo "Git panel and graph features"
+check "aggregated all-repositories view setting exists" \
+    matches crates/settings_content/src/settings_content.rs 'show_all_repositories'
+check "panel resolves an entry's own repository" \
+    has crates/git_ui/src/git_panel.rs 'fn repository_with_id'
+check "checking out from the graph refreshes branch state" \
+    has crates/project/src/git_store.rs 'fn schedule_status_refresh'
+check "graph create-ref modal supports annotated tags" \
+    has crates/git_ui/src/git_graph.rs 'message_editor'
+
+echo "Git protocol additions"
+for message in GitMerge GitCherryPick GitRevert GitCheckoutCommit GitCreateTag GitDeleteTag; do
+    check "$message is defined" matches crates/proto/proto/git.proto "^message ${message} "
+    check "$message is wired into the envelope" matches crates/proto/proto/zed.proto "\b${message} "
+done
+
+echo "Protocol sanity"
+if python3 - <<'PY'
+import re, sys
+source = open('crates/proto/proto/zed.proto').read()
+start = source.index('oneof payload', source.index('message Envelope'))
+block = source[start:source.index('\n  }\n', start)]
+numbers = [int(n) for n in re.findall(r'=\s*(\d+);', block)]
+duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+if duplicates:
+    print(f"duplicate envelope field numbers: {duplicates}", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+    printf '  ok    envelope field numbers are unique\n'
+else
+    printf '  MISSING  envelope field numbers are unique\n'
+    missing+=("envelope field numbers are unique")
+    failures=$((failures + 1))
+fi
+
+echo
+if [[ $failures -gt 0 ]]; then
+    echo "$failures fork customization(s) missing after the merge:"
+    printf '  - %s\n' "${missing[@]}"
+    echo
+    echo "Restore them from the pre-merge revision, or delete the check here if"
+    echo "upstream now covers the same behaviour."
+    exit 1
+fi
+
+echo "All fork customizations present."

@@ -1,0 +1,25 @@
+# Fails when a sync from upstream has dropped one of the fork's own changes.
+#
+# Taking upstream's side of a conflicted file is often right, but it silently
+# removes anything the fork had added to that same file. The v1.13.2 sync lost
+# three Windows bundling changes that way and the release build was the first
+# thing to notice. This runs the same marker checks on every push and pull
+# request so a dropped change fails in seconds instead of at build time.
+name: Fork Guardrail
+
+on:
+  push:
+    branches: [mvp-fork-dist]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  customizations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the fork's customizations survived
+        run: ./script/check-fork-customizations
