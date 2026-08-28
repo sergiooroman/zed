@@ -25,12 +25,13 @@ env:
 jobs:
   macos:
     name: Build macOS (arm64)
-    # Disabled by default: stock GitHub macOS runners hit a webrtc-sys C++/libc++
-    # toolchain error that upstream avoids with self-hosted runners. The macOS
-    # .dmg is built locally instead. Set repo variable ENABLE_MAC_CI=true to
-    # attempt it in CI again.
-    if: ${{ vars.ENABLE_MAC_CI == 'true' }}
-    runs-on: macos-14
+    # macos-15 for the SDK: on macos-14 (Xcode 15.4, MacOSX14.5) webrtc-sys fails
+    # to compile because that libc++ cannot instantiate cxx's
+    # rust::Slice<...>::iterator, which is why this job used to be disabled and
+    # the .dmg built by hand. Newer SDKs compile it — a local Xcode 26 does.
+    # Set ENABLE_MAC_CI=false to fall back to building the .dmg locally.
+    if: ${{ vars.ENABLE_MAC_CI != 'false' }}
+    runs-on: macos-15
     # Bash generate-licenses: setting this drops --fail and the strict
     # fail-on-stderr wrapper, so benign cargo warnings don't fail the build.
     # (The Windows PowerShell variant inverts this flag, so it stays unset there.)
@@ -44,6 +45,21 @@ jobs:
 
       - name: Add aarch64 target
         run: rustup target add aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-macos-arm64
+          cache-on-failure: true
+
+      - name: Set fork version from tag
+        # Same as the Windows job: the auto-updater compares the version baked
+        # into the binary against the manifest, so a .dmg built without this
+        # ships the working tree's version and never looks like an update.
+        run: |
+          version="${RELEASE_TAG#fork-v}"
+          perl -0pi -e "s/^version = \"[^\"]*\"/version = \"$version\"/m" crates/zed/Cargo.toml
+          echo "zed crate version set to $version"
 
       - name: Build unsigned .dmg
         # No signing env vars set -> the script skips signing/notarization.

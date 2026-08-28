@@ -1,3 +1,37 @@
+# This is a fork: never drop its changes
+
+This repository is a fork of zed-industries/zed with its own changes on top:
+branding and installer identity, telemetry defaults, an auto-updater pointing at
+the fork's own server, Windows and macOS bundling fixes, release and sync
+workflows, and several git panel and git graph features with their own protocol
+messages. `script/check-fork-customizations` lists every one of them and is the
+authority on what must survive.
+
+**Never remove or overwrite a fork change to make something else work.** This
+applies above all when syncing upstream: resolving a conflict by taking
+upstream's whole file silently deletes whatever the fork had added to it, with
+nothing to warn you. That is not theoretical. The v1.13.2 sync took upstream's
+`script/bundle-windows.ps1` wholesale and dropped three fork changes at once —
+the Visual Studio lookup, the Windows SDK lookup, and the installer's own
+identity. The release build failed, and had it not, the installer would have
+shipped under Zed's name and product code.
+
+So, when a conflict touches a file the fork has customized:
+
+- Find what the fork added before deciding anything:
+  `git log --oneline HEAD --not upstream/<release-branch> -- <file>`
+- Keep that behaviour and reconcile it with upstream's changes. Do not choose
+  one side wholesale.
+- Removing a fork change is allowed only when upstream now implements the same
+  behaviour itself. Say so explicitly in the commit message, and delete the
+  matching check from `script/check-fork-customizations` in the same commit.
+- Run `script/check-fork-customizations` before committing any merge. It fails
+  the build in CI, but by then the mistake is already pushed.
+
+Files no fork commit has ever touched are different: conflicts there come from
+release-line backports the fork carries, and taking upstream outright is
+correct. Verify it with the command above rather than assuming.
+
 # Rust coding guidelines
 
 * Prioritize code correctness and clarity. Speed and efficiency are secondary priorities unless otherwise specified.
