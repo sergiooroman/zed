@@ -88,7 +88,12 @@ jobs:
             2. git merge --no-commit --no-ff upstream/${{ steps.tag.outputs.release_branch }}
             3. Resolve every conflict, then commit the merge.
             4. Run ./script/check-fork-customizations. It must pass.
-            5. Run cargo check -p proto -p project -p git_ui. It must pass.
+            5. Run cargo check --workspace. It must pass. A merge can leave a file
+               that never conflicted in an inconsistent state, so checking only the
+               obviously affected crates is not enough: the v1.16.3 sync compiled
+               cleanly that way and still failed the release build, because the
+               fork's extra git panel setting no longer matched an array length
+               upstream had changed in settings_ui.
             6. Push the branch and open a PR against mvp-fork-dist titled
                "Sync upstream ${{ steps.tag.outputs.tag }}".
 
