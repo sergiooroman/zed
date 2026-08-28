@@ -1,10 +1,14 @@
 # Watches zed-industries/zed for new stable releases and, when one appears that
-# the fork hasn't integrated yet, opens a single PR to merge it into the fork's
-# branch (mvp-fork-dist). You review and merge it (resolving conflicts in the
-# GitHub UI or locally if any).
+# the fork hasn't integrated yet, has Claude merge it and open a pull request
+# for review.
 #
-# Idempotent: does nothing (silently) if the release is already integrated or a
-# sync PR for it is already open, so it won't spam PRs or emails.
+# Earlier versions opened the PR straight from upstream's release branch. That
+# needs no push, but the head then lives in a repository we don't control, so
+# nobody — not GitHub's web editor, not Claude, not a maintainer — can push a
+# conflict resolution to it, and every sync PR sat unresolvable. Claude runs
+# with the Claude GitHub App's own token, which carries the Workflows
+# permission that GITHUB_TOKEN lacks, so it can push a branch here that
+# includes upstream's workflow files.
 #
 # NOTE: scheduled workflows only run from the repository's DEFAULT branch, so
 # mvp-fork-dist must stay as the fork's default branch.
@@ -16,12 +20,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,6 +40,7 @@ jobs:
           # Force-update tags: the fork already carries all of upstream's tags,
           # so a plain fetch would be rejected for "would clobber existing tag".
           git fetch --quiet --force upstream 'refs/tags/*:refs/tags/*'
+          git fetch --quiet upstream '+refs/heads/*:refs/remotes/upstream/*'
 
       - name: Determine latest upstream stable release
         id: tag
@@ -41,12 +48,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="$(gh api repos/zed-industries/zed/releases/latest --jq .tag_name)"
-          # Upstream keeps a branch per release line (v1.13.2 lives on v1.13.x),
-          # and the PR is opened straight from it — see the note below.
+          # Upstream keeps a branch per release line (v1.16.3 lives on v1.16.x).
           RELEASE_BRANCH="${TAG%.*}.x"
           echo "Latest upstream stable: $TAG (branch $RELEASE_BRANCH)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "sync_branch=sync/upstream-$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether a sync is needed
         id: check
@@ -66,36 +73,44 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open sync PR
+      - name: Merge upstream and open the PR
         if: steps.check.outputs.needed == 'true'
-        env:
-          # Opening a PR whose head lives in zed-industries/zed needs a token
-          # with access to BOTH repositories; GITHUB_TOKEN is scoped to this one
-          # and the call comes back "Resource not accessible by integration".
-          # Set a SYNC_PAT secret (a classic PAT with public_repo is enough) to
-          # let the schedule open the PR unattended. Without it the step still
-          # runs and fails loudly, which is the signal to open the PR by hand.
-          GH_TOKEN: ${{ secrets.SYNC_PAT || github.token }}
-        run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          RELEASE_BRANCH="${{ steps.tag.outputs.release_branch }}"
-          # Open the PR directly from upstream's own release branch rather than
-          # copying it into this fork first. Pushing it here would carry
-          # upstream's .github/workflows/ files, and GITHUB_TOKEN is not allowed
-          # to create or update workflow files — that rejection ("`workflows`
-          # scope may be required") failed this job every Monday. A cross-fork
-          # PR needs no push at all, so no elevated token is needed.
-          # Conflicts, if any, surface on the PR for you to resolve.
-          #
-          # Called through the API rather than `gh pr create` because that helper
-          # always asks for maintainer_can_modify, which cannot be granted on a
-          # head branch living in a repository we do not control, and the call
-          # fails outright ("Fork collab can't be granted by someone without
-          # permission").
-          gh api "repos/$GITHUB_REPOSITORY/pulls" -X POST \
-            -f title="Sync upstream $TAG" \
-            -f head="zed-industries:$RELEASE_BRANCH" \
-            -f base="mvp-fork-dist" \
-            -F maintainer_can_modify=false \
-            -f body="Brings in upstream Zed \`$TAG\` from the \`$RELEASE_BRANCH\` release branch. Review, resolve any conflicts, and merge; then cut a \`fork-v*\` tag to publish a build." \
-            --jq .html_url
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--max-turns 60"
+          prompt: |
+            Merge upstream Zed ${{ steps.tag.outputs.tag }} into this fork and open a pull
+            request for a human to review. Do not push to mvp-fork-dist.
+
+            Steps:
+            1. git checkout -b ${{ steps.tag.outputs.sync_branch }}
+            2. git merge --no-commit --no-ff upstream/${{ steps.tag.outputs.release_branch }}
+            3. Resolve every conflict, then commit the merge.
+            4. Run ./script/check-fork-customizations. It must pass.
+            5. Run cargo check -p proto -p project -p git_ui. It must pass.
+            6. Push the branch and open a PR against mvp-fork-dist titled
+               "Sync upstream ${{ steps.tag.outputs.tag }}".
+
+            How to resolve conflicts:
+
+            - Zed maintains each release line on its own branch, not one cumulative
+              line, so this fork's older backports conflict with files it never
+              customized. For any conflicted file no fork commit has ever touched,
+              take upstream's side outright. Check with:
+              git log --oneline HEAD --not upstream/${{ steps.tag.outputs.release_branch }} -- <file>
+            - For a file the fork HAS customized, keep the fork's behaviour and
+              reconcile it with upstream's changes. Never take a whole file from
+              upstream without first checking what the fork added to it: a previous
+              sync did exactly that and silently dropped three Windows bundling
+              changes, one of which broke the release build.
+            - The fork's git envelope fields live at 9000-9005 in
+              crates/proto/proto/zed.proto, deliberately far above upstream's
+              numbering. Leave them there, and never reuse a number upstream uses.
+            - If upstream now implements something the fork had patched around,
+              prefer upstream's version and delete the corresponding check from
+              script/check-fork-customizations, explaining why in the commit message.
+
+            If a conflict genuinely needs a human decision, or either check keeps
+            failing, stop and open the PR anyway with the conflicts described in the
+            body, clearly marked as needing a human.
