@@ -505,7 +505,9 @@ message Envelope {
     RefreshDocumentColors refresh_document_colors = 474;
     RefreshDocumentLinks refresh_document_links = 475;
     RefreshFoldingRanges refresh_folding_ranges = 476;
-    RefreshDocumentSymbols refresh_document_symbols = 477; // current max
+    RefreshDocumentSymbols refresh_document_symbols = 477;
+    BlameBufferAtRevision blame_buffer_at_revision = 478;
+    BlameBufferAtRevisionResponse blame_buffer_at_revision_response = 479; // current max
 
     // Fork-only git operations, parked far above upstream's numbering. They
     // started at 462 and have already had to move once when upstream grew into
