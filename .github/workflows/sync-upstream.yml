@@ -73,6 +73,17 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Start the merge and resolve what needs no judgement
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          git config user.name "fork-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -b "${{ steps.tag.outputs.sync_branch }}"
+          # Exit 10 means conflicts remain that carry fork changes; that is the
+          # agent's job, not a failure.
+          ./script/sync-upstream-merge "upstream/${{ steps.tag.outputs.release_branch }}" upstream || \
+            [ $? -eq 10 ]
+
       - name: Merge upstream and open the PR
         if: steps.check.outputs.needed == 'true'
         uses: anthropics/claude-code-action@v1
@@ -83,7 +94,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          show_full_output: true
           # Without an explicit allowlist Claude gets no shell and no GitHub
           # access, so it cannot run git, cargo or gh at all. The first scheduled
           # run spent 19 turns hitting 12 permission denials and still reported
@@ -99,12 +109,15 @@ jobs:
             Merge upstream Zed ${{ steps.tag.outputs.tag }} into this fork and open a pull
             request for a human to review. Do not push to mvp-fork-dist.
 
+            The merge is already in progress on branch
+            ${{ steps.tag.outputs.sync_branch }}: script/sync-upstream-merge has taken
+            upstream's side for every conflicted file this fork has never touched,
+            and left only the ones carrying fork changes. Do not re-derive that.
+
             Steps:
-            1. git checkout -b ${{ steps.tag.outputs.sync_branch }}
-            2. git merge --no-commit --no-ff upstream/${{ steps.tag.outputs.release_branch }}
-            3. Resolve every conflict, then commit the merge.
-            4. Run ./script/check-fork-customizations. It must pass.
-            5. Push the branch and open a PR against mvp-fork-dist titled
+            1. Resolve the files still conflicted, then commit the merge.
+            2. Run ./script/check-fork-customizations. It must pass.
+            3. Push the branch and open a PR against mvp-fork-dist titled
                "Sync upstream ${{ steps.tag.outputs.tag }}".
 
             Do not compile. A workspace check takes far longer than this run has,

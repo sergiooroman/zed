@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Merges an upstream release branch and resolves the conflicts that need no
+# judgement, leaving only the ones that do.
+#
+# Zed keeps each release line on its own branch rather than one cumulative line,
+# so the backports this fork already carries conflict with files it has never
+# customized. Those are noise: the fork has no opinion about them and upstream's
+# side is simply correct. Deciding that per file is mechanical — ask git whether
+# any fork commit ever touched the file — so do it here rather than spending an
+# agent's whole budget re-deriving it, which is what happened when the sync was
+# handed over wholesale and never got as far as opening a pull request.
+#
+# Usage: script/sync-upstream-merge <upstream-release-ref> [upstream-remote]
+# Leaves the merge in progress. Prints the files still conflicted, if any.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+release_ref="${1:?usage: sync-upstream-merge <upstream-release-ref> [upstream-remote]}"
+upstream_remote="${2:-upstream}"
+
+git merge --no-commit --no-ff "$release_ref" >/dev/null 2>&1
+
+# Read with a loop rather than mapfile: macOS still ships bash 3.2, which has
+# neither mapfile nor readarray, and this script is run by hand as often as by CI.
+conflicted=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && conflicted+=("$line")
+done < <(git diff --name-only --diff-filter=U)
+
+if [[ ${#conflicted[@]} -eq 0 ]]; then
+    echo "Merged cleanly; nothing to resolve."
+    exit 0
+fi
+
+taken=()
+remaining=()
+for file in ${conflicted[@]+"${conflicted[@]}"}; do
+    # Exclude every upstream ref, not just the branch being merged: this fork
+    # already carries earlier release lines, whose commits are upstream's too.
+    # Excluding only the target branch counted those as ours and reported every
+    # conflict as needing judgement, which is the whole thing this avoids.
+    if [[ -z "$(git log --oneline HEAD --not --remotes="$upstream_remote" -- "$file")" ]]; then
+        git checkout --theirs -- "$file" 2>/dev/null && git add -- "$file" && taken+=("$file")
+    else
+        remaining+=("$file")
+    fi
+done
+
+echo "Conflicts: ${#conflicted[@]} total"
+if [[ ${#taken[@]:-0} -gt 0 ]]; then
+    echo "Resolved to upstream (untouched by this fork): ${#taken[@]}"
+    printf '  %s\n' ${taken[@]+"${taken[@]}"}
+fi
+if [[ ${#remaining[@]:-0} -eq 0 ]]; then
+    echo "Nothing left needing judgement."
+    exit 0
+fi
+echo "Still conflicted — these carry fork changes and need a decision:"
+printf '  %s\n' ${remaining[@]+"${remaining[@]}"}
+exit 10
