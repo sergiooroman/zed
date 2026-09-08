@@ -9750,6 +9750,7 @@ mod tests {
     #[test]
     fn test_tree_view_directory_expansion_is_scoped_to_section() {
         let entry = |path, status| GitStatusEntry {
+            repo_id: RepositoryId(0),
             repo_path: repo_path(path),
             status,
             staging: StageStatus::Unstaged,
@@ -13591,6 +13592,7 @@ mod tests {
     #[test]
     fn test_directory_discard_tracked_changes() {
         let entry = |path, status: FileStatus| GitStatusEntry {
+            repo_id: RepositoryId(0),
             repo_path: repo_path(path),
             staging: status.staging(),
             status,
