@@ -49,6 +49,18 @@ check "Windows installer identifies as the fork" \
     has script/bundle-windows.ps1 '$appName = "Zed Fork"'
 check "Windows installer uses the fork's own product code" \
     has script/bundle-windows.ps1 '9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680'
+# macOS identity lives in cargo-bundle metadata rather than the bundle script.
+# The v1.16.3 sync resolved crates/zed/Cargo.toml in upstream's favour for the
+# version bump and took the identifier with it, so the release installed as a
+# second, differently-named app instead of updating the one already there.
+check "macOS app is named after the fork" \
+    has crates/zed/Cargo.toml 'name = "Zed Fork"'
+check "macOS bundle identifier is the fork's own" \
+    has crates/zed/Cargo.toml 'identifier = "dev.mvpfactory.zed-fork"'
+check "macOS URL scheme is the fork's own" \
+    has crates/zed/Cargo.toml 'osx_url_schemes = ["zed-fork"]'
+check "runtime_shaders feature is available for local builds" \
+    matches crates/zed/Cargo.toml '^runtime_shaders = '
 
 echo "Build scripts"
 check "Visual Studio is located via vswhere, not a hardcoded edition" \

@@ -12,6 +12,9 @@ default-run = "zed"
 workspace = true
 
 [features]
+# Compile Metal shaders at runtime instead of at build time, so the fork can be
+# built without the Xcode Metal compiler (only the Command Line Tools).
+runtime_shaders = ["gpui_platform/runtime_shaders"]
 tracy = ["ztracing/tracy"]
 # LEAK_BACKTRACE=1 cargo run --features zed/track-project-leak --profile release-fast
 track-project-leak = ["gpui/leak-detection"]
@@ -285,12 +288,16 @@ repl = { workspace = true, features = ["test-support"] }
 
 
 [package.metadata.bundle-dev]
+# The fork ships on the dev channel under its own identity. The bundle
+# identifier is what macOS uses to tell one app from another, so changing it
+# back to upstream's makes an update install alongside the existing app instead
+# of replacing it — which is exactly what happened after the v1.16.3 sync.
 icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
-identifier = "dev.zed.Zed-Dev"
-name = "Zed Dev"
+identifier = "dev.mvpfactory.zed-fork"
+name = "Zed Fork"
 osx_minimum_system_version = "10.15.7"
 osx_info_plist_exts = ["resources/info/*"]
-osx_url_schemes = ["zed"]
+osx_url_schemes = ["zed-fork"]
 
 [package.metadata.bundle-nightly]
 icon = ["resources/app-icon-nightly@2x.png", "resources/app-icon-nightly.png"]
