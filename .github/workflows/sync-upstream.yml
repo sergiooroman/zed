@@ -76,8 +76,14 @@ jobs:
       - name: Merge upstream and open the PR
         if: steps.check.outputs.needed == 'true'
         uses: anthropics/claude-code-action@v1
+        env:
+          # The action authenticates git for the agent, but the `gh` CLI reads
+          # its own credential from the environment, so without this the PR step
+          # of the prompt cannot work no matter how well the merge went.
+          GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
           # Without an explicit allowlist Claude gets no shell and no GitHub
           # access, so it cannot run git, cargo or gh at all. The first scheduled
           # run spent 19 turns hitting 12 permission denials and still reported
