@@ -82,6 +82,10 @@ jobs:
           # access, so it cannot run git, cargo or gh at all. The first scheduled
           # run spent 19 turns hitting 12 permission denials and still reported
           # success, because being unable to act is not an error.
+          # TEMPORARY: surfaces Claude's transcript in the run log so a sync that
+          # ends without a PR can be diagnosed. Remove once this is understood —
+          # the log is public on this repository.
+          show_full_output: true
           claude_args: >-
             --max-turns 60
             --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
