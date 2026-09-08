@@ -36,6 +36,10 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Install Linux system dependencies
+        # Zed links against X11 and friends on Linux; without these the build
+        # scripts fail before any of the merge is even compiled.
+        run: ./script/linux
       - name: Install Rust toolchain
         run: rustup show
       - uses: Swatinem/rust-cache@v2
