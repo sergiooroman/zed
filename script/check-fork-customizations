@@ -59,6 +59,10 @@ check "Windows installer uses the fork's own product code" \
 # v1.16.3, installing as a second app called Zed rather than updating Zed Fork.
 check "release channel is the fork's own (dev)" \
     matches crates/zed/RELEASE_CHANNEL '^dev$'
+check "macOS app uses the fork's own icon" \
+    has crates/zed/Cargo.toml 'resources/app-icon-fork@2x.png'
+check "the fork's icon files are present" \
+    test -f crates/zed/resources/app-icon-fork@2x.png
 check "macOS app is named after the fork" \
     has crates/zed/Cargo.toml 'name = "Zed Fork"'
 check "macOS bundle identifier is the fork's own" \

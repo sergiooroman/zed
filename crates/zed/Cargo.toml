@@ -292,7 +292,7 @@ repl = { workspace = true, features = ["test-support"] }
 # identifier is what macOS uses to tell one app from another, so changing it
 # back to upstream's makes an update install alongside the existing app instead
 # of replacing it — which is exactly what happened after the v1.16.3 sync.
-icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
+icon = ["resources/app-icon-fork@2x.png", "resources/app-icon-fork.png"]
 identifier = "dev.mvpfactory.zed-fork"
 name = "Zed Fork"
 osx_minimum_system_version = "10.15.7"
