@@ -93,6 +93,8 @@ check "license generation tolerates missing licenses" \
     has .github/workflows/fork-release.yml 'ALLOW_MISSING_LICENSES'
 check "Windows long paths are enabled for deep git fixtures" \
     matches .github/workflows/fork-release.yml 'longpaths'
+check "merging a sync PR cuts the release tag by itself" \
+    has .github/workflows/fork-release.yml 'Decide the release tag'
 
 echo "Git panel and graph features"
 check "aggregated all-repositories view setting exists" \
