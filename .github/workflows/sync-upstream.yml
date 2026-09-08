@@ -82,12 +82,12 @@ jobs:
           # access, so it cannot run git, cargo or gh at all. The first scheduled
           # run spent 19 turns hitting 12 permission denials and still reported
           # success, because being unable to act is not an error.
-          # TEMPORARY: surfaces Claude's transcript in the run log so a sync that
-          # ends without a PR can be diagnosed. Remove once this is understood —
-          # the log is public on this repository.
-          show_full_output: true
+          # Without an explicit allowlist Claude gets no shell and no GitHub
+          # access at all, and a run that cannot act still reports success.
+          # The turn budget is generous because a two-release jump can carry a
+          # dozen conflicts, each costing several turns to resolve.
           claude_args: >-
-            --max-turns 60
+            --max-turns 200
             --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
           prompt: |
             Merge upstream Zed ${{ steps.tag.outputs.tag }} into this fork and open a pull
@@ -98,14 +98,15 @@ jobs:
             2. git merge --no-commit --no-ff upstream/${{ steps.tag.outputs.release_branch }}
             3. Resolve every conflict, then commit the merge.
             4. Run ./script/check-fork-customizations. It must pass.
-            5. Run cargo check --workspace. It must pass. A merge can leave a file
-               that never conflicted in an inconsistent state, so checking only the
-               obviously affected crates is not enough: the v1.16.3 sync compiled
-               cleanly that way and still failed the release build, because the
-               fork's extra git panel setting no longer matched an array length
-               upstream had changed in settings_ui.
-            6. Push the branch and open a PR against mvp-fork-dist titled
+            5. Push the branch and open a PR against mvp-fork-dist titled
                "Sync upstream ${{ steps.tag.outputs.tag }}".
+
+            Do not compile. A workspace check takes far longer than this run has,
+            and CI does it on the pull request anyway. Note in the PR body that
+            the merge has not been compiled, so whoever reviews it waits for the
+            checks — a merge can leave a file that never conflicted in an
+            inconsistent state, which is how the v1.16.3 sync passed a partial
+            check and still failed the release build.
 
             Read CLAUDE.md first. Its opening section is binding: this is a fork,
             and a sync must not drop any of its changes. If you cannot preserve a

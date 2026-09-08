@@ -23,3 +23,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check the fork's customizations survived
         run: ./script/check-fork-customizations
+
+  compiles:
+    # Only on pull requests: this is what validates a sync merge, and the agent
+    # that prepares one cannot compile within a single run. A merge can leave a
+    # file that never conflicted in an inconsistent state, so check the whole
+    # workspace rather than the crates that happened to conflict — the v1.16.3
+    # sync passed a partial check and still failed the release build.
+    if: github.event_name == 'pull_request'
+    name: Workspace compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-guardrail-linux
+          cache-on-failure: true
+      - name: cargo check --workspace
+        run: cargo check --workspace --all-targets
