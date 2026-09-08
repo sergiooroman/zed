@@ -204,3 +204,25 @@ jobs:
             gh release create "$env:RELEASE_TAG" --title "$env:RELEASE_TAG" --notes "Fork build" --draft
           }
           gh release upload "$env:RELEASE_TAG" dist/ZedFork-windows-x64.exe --clobber
+
+  publish:
+    name: Publish the release
+    # Both builds upload into the same draft, so publishing has to wait for the
+    # slower one; going live after the first would put a release on the landing
+    # page with only one platform's installer on it.
+    needs: [tag, macos, windows]
+    # `needs` alone would skip this whenever macOS is turned off, so depend on
+    # the results rather than on the jobs having run.
+    if: >-
+      always() && needs.tag.outputs.release == 'true'
+      && needs.windows.result == 'success'
+      && (needs.macos.result == 'success' || needs.macos.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take the release out of draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "Published $RELEASE_TAG"

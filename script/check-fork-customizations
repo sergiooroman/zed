@@ -95,6 +95,8 @@ check "Windows long paths are enabled for deep git fixtures" \
     matches .github/workflows/fork-release.yml 'longpaths'
 check "merging a sync PR cuts the release tag by itself" \
     has .github/workflows/fork-release.yml 'Decide the release tag'
+check "the release publishes itself once both builds are up" \
+    has .github/workflows/fork-release.yml 'Take the release out of draft'
 
 echo "Git panel and graph features"
 check "aggregated all-repositories view setting exists" \
