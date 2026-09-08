@@ -55,7 +55,6 @@ jobs:
           owner: zed-industries
           repositories: zed
           permission-issues: read
-          permission-members: read
           permission-organization-projects: write
           permission-pull-requests: read
 
