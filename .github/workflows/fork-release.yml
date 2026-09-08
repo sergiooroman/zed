@@ -1,7 +1,9 @@
 # Fork release workflow — builds unsigned macOS (arm64) and Windows (x64)
 # artifacts and attaches them to a GitHub Release on the fork.
 #
-# Trigger by pushing a tag like `fork-v1.0.0`, or manually via the Actions tab.
+# Runs on a push to mvp-fork-dist that changes the zed crate's version, which
+# is what merging a sync pull request does, and cuts the tag itself. Pushing a
+# `fork-v*` tag by hand still works, as does the manual dispatch below.
 # The landing page / VPS links to the resulting release assets.
 name: Fork Release
 
@@ -9,6 +11,8 @@ on:
   push:
     tags:
       - "fork-v*"
+    branches:
+      - mvp-fork-dist
   workflow_dispatch:
     inputs:
       tag:
@@ -18,11 +22,50 @@ on:
 permissions:
   contents: write
 
-env:
-  # Resolve the tag from either the push ref or the manual input.
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-
 jobs:
+  tag:
+    name: Decide the release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      release: ${{ steps.pick.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the tag, cutting it if this is a branch push
+        id: pick
+        run: |
+          # A tag push or a manual dispatch already names the release.
+          if [ "${{ github.ref_type }}" != "branch" ]; then
+            echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # On a branch push, release only when the version moved. Merging a
+          # sync PR is what moves it; the fork's own commits leave it alone, so
+          # this does not turn every push into a release.
+          version="$(grep -m1 '^version = ' crates/zed/Cargo.toml | cut -d'"' -f2)"
+          tag="fork-v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "fork-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git tag -a "$tag" -m "Fork release $version"
+          # A tag pushed with GITHUB_TOKEN does not start another workflow run,
+          # so this cannot rely on its own `on: push: tags` trigger firing. That
+          # is why the build jobs below hang off this one and run here.
+          git push origin "$tag"
+          echo "Cut $tag at $GITHUB_SHA"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
   macos:
     name: Build macOS (arm64)
     # macos-15 for the SDK: on macos-14 (Xcode 15.4, MacOSX14.5) webrtc-sys fails
@@ -30,13 +73,15 @@ jobs:
     # rust::Slice<...>::iterator, which is why this job used to be disabled and
     # the .dmg built by hand. Newer SDKs compile it — a local Xcode 26 does.
     # Set ENABLE_MAC_CI=false to fall back to building the .dmg locally.
-    if: ${{ vars.ENABLE_MAC_CI != 'false' }}
+    needs: tag
+    if: ${{ needs.tag.outputs.release == 'true' && vars.ENABLE_MAC_CI != 'false' }}
     runs-on: macos-15
     # Bash generate-licenses: setting this drops --fail and the strict
     # fail-on-stderr wrapper, so benign cargo warnings don't fail the build.
     # (The Windows PowerShell variant inverts this flag, so it stays unset there.)
     env:
       ALLOW_MISSING_LICENSES: "1"
+      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,11 +128,14 @@ jobs:
     name: Build Windows (x64)
     # Pinned to 2022: it ships Inno Setup with iscc in PATH; the bundle script
     # assumes that layout. (Windows 2025 runners differ — see the script's notes.)
+    needs: tag
+    if: ${{ needs.tag.outputs.release == 'true' }}
     runs-on: windows-2022
     # Use the git CLI for fetching so core.longpaths applies — some git deps
     # (e.g. the `pet` test fixtures) exceed Windows' 260-char path limit.
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
