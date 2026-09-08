@@ -53,6 +53,12 @@ check "Windows installer uses the fork's own product code" \
 # The v1.16.3 sync resolved crates/zed/Cargo.toml in upstream's favour for the
 # version bump and took the identifier with it, so the release installed as a
 # second, differently-named app instead of updating the one already there.
+# The channel decides which bundle metadata and which installer branch apply, so
+# a merge that resets it to upstream's "stable" makes every identity check below
+# irrelevant: the fork's blocks are simply never read. That is what shipped in
+# v1.16.3, installing as a second app called Zed rather than updating Zed Fork.
+check "release channel is the fork's own (dev)" \
+    matches crates/zed/RELEASE_CHANNEL '^dev$'
 check "macOS app is named after the fork" \
     has crates/zed/Cargo.toml 'name = "Zed Fork"'
 check "macOS bundle identifier is the fork's own" \
