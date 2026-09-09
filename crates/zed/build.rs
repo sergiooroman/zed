@@ -228,14 +228,8 @@ fn icon_path() -> std::path::PathBuf {
         _ => "-dev",
     };
 
-    // The fork ships its own Windows icon rather than upstream's grey dev one.
-    // macOS gets its equivalent from [package.metadata.bundle-dev] in Cargo.toml.
     #[cfg(windows)]
-    let icon = if release_channel == "dev" {
-        "resources/windows/app-icon-fork.ico".to_string()
-    } else {
-        format!("resources/windows/app-icon{}.ico", channel)
-    };
+    let icon = format!("resources/windows/app-icon{}.ico", channel);
     #[cfg(not(windows))]
     let icon = format!("resources/app-icon{}.png", channel);
 
