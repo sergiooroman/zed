@@ -63,6 +63,12 @@ check "macOS app uses the fork's own icon" \
     has crates/zed/Cargo.toml 'resources/app-icon-fork@2x.png'
 check "the fork's icon files are present" \
     test -f crates/zed/resources/app-icon-fork@2x.png
+check "the fork's Windows icon file is present" \
+    test -f crates/zed/resources/windows/app-icon-fork.ico
+check "the .exe embeds the fork's own icon" \
+    has crates/zed/build.rs 'resources/windows/app-icon-fork.ico'
+check "the Windows installer uses the fork's own icon" \
+    has script/bundle-windows.ps1 'app-icon-fork'
 check "macOS app is named after the fork" \
     has crates/zed/Cargo.toml 'name = "Zed Fork"'
 check "macOS bundle identifier is the fork's own" \

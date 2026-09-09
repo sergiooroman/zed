@@ -327,7 +327,7 @@ function BuildInstaller {
             # single-instance code; changing them would break packaging without a
             # custom manifest.
             $appId = "{{9F2A7C34-1E6B-4D8A-B053-7C21E9A4F680}"
-            $appIconName = "app-icon-dev"
+            $appIconName = "app-icon-fork"
             $appName = "Zed Fork"
             $appDisplayName = "Zed Fork"
             $appSetupName = "Zed-$Architecture"
