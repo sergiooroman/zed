@@ -47,7 +47,11 @@ pub fn compile(manifest: bool) -> Result<(), Box<dyn std::error::Error>> {
         "stable" => ("app-icon.ico", "Zed"),
         "preview" => ("app-icon-preview.ico", "Zed Preview"),
         "nightly" => ("app-icon-nightly.ico", "Zed Nightly"),
-        _ => ("app-icon-dev.ico", "Zed Dev"),
+        // The fork's own icon and product name, rather than upstream's grey
+        // dev icon and "Zed Dev". This is what the .exe carries into the Start
+        // menu and taskbar; the installer's own icon comes from
+        // script/bundle-windows.ps1.
+        _ => ("app-icon-fork.ico", "Zed Fork"),
     };
     let icon = std::path::PathBuf::from(ICON_DIR).join(icon_filename);
     let icon_escaped = icon.to_string_lossy().replace('\\', "\\\\");
