@@ -790,7 +790,9 @@ impl MarkedDirectoryCoverage {
     /// inside a marked directory.
     fn observe(&mut self, entry: &GitListEntry, marked_directories: &HashSet<TreeKey>) -> bool {
         let depth = match entry {
-            GitListEntry::Header(_) => {
+            // A repo header, like a section header, starts a new stretch of
+            // rows: nothing above it can be covering the rows below.
+            GitListEntry::Header(_) | GitListEntry::RepoHeader(_) => {
                 self.covering_depth = None;
                 return false;
             }
@@ -1545,6 +1547,7 @@ impl GitPanel {
             GitListEntry::TreeStatus(entry) => Some(RowMark::File(entry.entry.repo_path.clone())),
             GitListEntry::Directory(directory) => Some(RowMark::Directory(directory.key.clone())),
             GitListEntry::Header(_) => None,
+            GitListEntry::RepoHeader(_) => None,
             GitListEntry::EmptySection(_) => None,
         }
     }
