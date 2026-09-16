@@ -6,9 +6,12 @@
 # needs no push, but the head then lives in a repository we don't control, so
 # nobody — not GitHub's web editor, not Claude, not a maintainer — can push a
 # conflict resolution to it, and every sync PR sat unresolvable. Claude runs
-# with the Claude GitHub App's own token, which carries the Workflows
-# permission that GITHUB_TOKEN lacks, so it can push a branch here that
-# includes upstream's workflow files.
+# with the Claude GitHub App's own token and pushes the branch here.
+#
+# That token has NO `workflows` permission either (the v1.20.1 sync was
+# refused outright for touching .github/workflows), so script/sync-upstream-merge
+# keeps the fork's workflow files as they are and drops upstream's changes to
+# them. The fork runs its own CI; upstream's is not tracked.
 #
 # NOTE: scheduled workflows only run from the repository's DEFAULT branch, so
 # mvp-fork-dist must stay as the fork's default branch.

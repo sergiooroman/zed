@@ -21,6 +21,23 @@ upstream_remote="${2:-upstream}"
 
 git merge --no-commit --no-ff "$release_ref" >/dev/null 2>&1
 
+# The fork keeps its own CI, so upstream's workflow files stay frozen at
+# whatever the fork already carries. Two reasons. The token the sync agent
+# pushes with has no `workflows` permission, so GitHub refuses any push that
+# touches .github/workflows at all — the v1.18.1 and v1.20.1 syncs each had to
+# revert those files by hand just to get the merge pushed. And none of that
+# CI is the fork's to run anyway: it is Zed's triage, guild and release
+# machinery. Restore ours over any change or conflict, and drop what upstream
+# added, so the merge pushes clean and no PR carries a "still to apply" note.
+workflow_changes="$(git diff --name-only --cached -- .github/workflows; git diff --name-only --diff-filter=U -- .github/workflows)"
+if [[ -n "$workflow_changes" ]]; then
+    git checkout HEAD -- .github/workflows 2>/dev/null || true
+    while IFS= read -r added; do
+        [[ -n "$added" ]] && git rm -q --cached -- "$added" 2>/dev/null && rm -f -- "$added"
+    done < <(git diff --name-only --cached --diff-filter=A -- .github/workflows)
+    echo "Kept the fork's .github/workflows as they were (upstream's CI is not tracked)."
+fi
+
 # Read with a loop rather than mapfile: macOS still ships bash 3.2, which has
 # neither mapfile nor readarray, and this script is run by hand as often as by CI.
 conflicted=()
