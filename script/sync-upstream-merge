@@ -24,35 +24,50 @@ git merge --no-commit --no-ff "$release_ref" >/dev/null 2>&1
 # Read with a loop rather than mapfile: macOS still ships bash 3.2, which has
 # neither mapfile nor readarray, and this script is run by hand as often as by CI.
 conflicted=()
+n_conflicted=0
 while IFS= read -r line; do
-    [[ -n "$line" ]] && conflicted+=("$line")
+    [[ -n "$line" ]] && conflicted+=("$line") && n_conflicted=$((n_conflicted + 1))
 done < <(git diff --name-only --diff-filter=U)
 
-if [[ ${#conflicted[@]} -eq 0 ]]; then
+if [[ $n_conflicted -eq 0 ]]; then
     echo "Merged cleanly; nothing to resolve."
     exit 0
 fi
 
+# The upstream release this fork last integrated. A conflicted file whose
+# content at HEAD is byte-identical to that release carries nothing of ours,
+# whatever its history says.
+last_synced="$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD 2>/dev/null || true)"
+
 taken=()
 remaining=()
+n_taken=0
+n_remaining=0
 for file in ${conflicted[@]+"${conflicted[@]}"}; do
-    # Exclude every upstream ref, not just the branch being merged: this fork
-    # already carries earlier release lines, whose commits are upstream's too.
-    # Excluding only the target branch counted those as ours and reported every
-    # conflict as needing judgement, which is the whole thing this avoids.
-    if [[ -z "$(git log --oneline HEAD --not --remotes="$upstream_remote" -- "$file")" ]]; then
-        git checkout --theirs -- "$file" 2>/dev/null && git add -- "$file" && taken+=("$file")
+    # Two ways a file can be shown to carry no fork change. By content: it is
+    # identical to the last synced upstream release. By history: no commit
+    # outside upstream's refs ever touched it. The content test is needed
+    # because a sync's own merge commit "touches" every file it resolved, so
+    # after one sync the history test alone flags files we merely took from
+    # upstream last time, and they would need judgement forever.
+    # The history test excludes EVERY upstream ref, not just the branch being
+    # merged: this fork carries earlier release lines, whose commits are
+    # upstream's too, and excluding only the target branch counted them as ours.
+    if { [[ -n "$last_synced" ]] && git diff --quiet "$last_synced" HEAD -- "$file"; } \
+        || [[ -z "$(git log --oneline HEAD --not --remotes="$upstream_remote" -- "$file")" ]]; then
+        git checkout --theirs -- "$file" 2>/dev/null && git add -- "$file" && taken+=("$file") && n_taken=$((n_taken + 1))
     else
         remaining+=("$file")
+        n_remaining=$((n_remaining + 1))
     fi
 done
 
-echo "Conflicts: ${#conflicted[@]} total"
-if [[ ${#taken[@]:-0} -gt 0 ]]; then
-    echo "Resolved to upstream (untouched by this fork): ${#taken[@]}"
+echo "Conflicts: $n_conflicted total"
+if [[ $n_taken -gt 0 ]]; then
+    echo "Resolved to upstream (untouched by this fork): $n_taken"
     printf '  %s\n' ${taken[@]+"${taken[@]}"}
 fi
-if [[ ${#remaining[@]:-0} -eq 0 ]]; then
+if [[ $n_remaining -eq 0 ]]; then
     echo "Nothing left needing judgement."
     exit 0
 fi
